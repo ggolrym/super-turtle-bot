@@ -94,10 +94,11 @@ if len(buy_signals) > 0 or len(sell_signals) > 0:
     이 결과를 바탕으로 디스코드 알림 메시지를 작성해줘. 이모티콘 듬뿍 넣어서!
     """
     
-    response = client.models.generate_content(
-        model='gemini-1.5-flash',
+        response = client.models.generate_content(
+        model='gemini-2.0-flash',  # 👈 여기를 2.0으로 바꿨어!
         contents=prompt,
     )
+
     
     message_data = {"content": f"🌍 **코스피 전체 장악! 터틀 로봇** 🌍\n{response.text}"}
     requests.post(DISCORD_WEBHOOK_URL, data=message_data)
