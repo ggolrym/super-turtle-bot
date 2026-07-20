@@ -21,7 +21,7 @@ jobs:
 
     - name: 3. 마법 도구 설치하기
       run: |
-        pip install yfinance finance-datareader google-generativeai requests
+        pip install yfinance finance-datareader google-genai requests
 
     - name: 4. 로봇 실행!
       env:
