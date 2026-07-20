@@ -25,10 +25,10 @@ print("📚 비밀 출석부를 펼칩니다...")
 # ==========================================
 try:
     # 깃허브 방에 올려둔 kospi_list.csv 파일을 읽어와! (숫자 0이 안 지워지게 dtype=str로 설정)
-    korea_df = pd.read_csv('kospi_list.csv', dtype={'Symbol': str})
+    korea_df = pd.read_csv('kospi_list.csv', dtype={'Code': str})
     
     # 읽어온 표를 파이썬 리스트로 싹 변환하기
-    korea_tickers = korea_df['Symbol'].tolist()
+    korea_tickers = korea_df['Code'].tolist()
     korea_names = korea_df['Name'].tolist()
     
     # 딕셔너리로 만들기 (티커 뒤에 '.KS'를 붙여야 야후 파이낸스가 알아들어!)
