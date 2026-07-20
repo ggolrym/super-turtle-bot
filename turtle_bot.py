@@ -83,24 +83,25 @@ for ticker, name in all_stocks.items():
 
 print(f"\n✅ 글로벌 검사 끝! 살 주식 {len(buy_signals)}개 발견.")
 
+# 4. 제미나이에게 보고서 쓰라고 시키기!
 if len(buy_signals) > 0 or len(sell_signals) > 0:
     prompt = f"""
-    너는 12살도 이해하기 쉽게 설명해주는 최고의 퀀트 투자 비서야.
+    너는 12살도 이해하기 쉽게 설명해주는 글로벌 퀀트 투자 비서야.
     오늘 한국 코스피 900개와 미국 대장주를 모두 싹쓸이 검사했어.
     
-    - 🟢 매수 추천 (200일선 뚫고 폭발!): {buy_signals if buy_signals else '없음'}
-    - 🔴 매도 경고 (10일 최저가 붕괴): {sell_signals if sell_signals else '없음'}
+    - 🟢 매수 추천 (200일선 뚫고 폭발하는 대장주!): {buy_signals if buy_signals else '없음'}
+    - 🔴 매도 경고 (10일 최저가 깨져서 도망쳐야 할 주식): {sell_signals if sell_signals else '없음'}
     
-    이 결과를 바탕으로 디스코드 알림 메시지를 작성해줘. 이모티콘 듬뿍 넣어서!
+    이 결과를 바탕으로 디스코드 알림 메시지를 흥미진진하게 작성해줘! (이모티콘 팍팍!)
     """
     
-        response = client.models.generate_content(
-        model='gemini-2.0-flash',  # 👈 여기를 2.0으로 바꿨어!
+    response = client.models.generate_content(
+        model='gemini-2.0-flash',
         contents=prompt,
     )
-
     
     message_data = {"content": f"🌍 **코스피 전체 장악! 터틀 로봇** 🌍\n{response.text}"}
     requests.post(DISCORD_WEBHOOK_URL, data=message_data)
+    print("디스코드로 글로벌 알림 쏘기 성공! 👏")
 else:
     print("오늘은 살만한 주식이 없네요! 😴")
