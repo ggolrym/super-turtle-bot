@@ -1,11 +1,15 @@
+# ==========================================
+# 🐢 AI 터틀 트레이딩 (한미 대장주 150 압축 버전)
+# ==========================================
 import os
 import yfinance as yf
-import pandas as pd  # 엑셀/CSV 파일을 읽어주는 아주 강력한 마법 도구야!
+import FinanceDataReader as fdr
 from google import genai
 import requests
 import time
 from datetime import datetime
 
+# 1. 금고에서 비밀번호 꺼내기
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
@@ -18,44 +22,39 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 buy_signals = []
 sell_signals = []
 
-print("📚 비밀 출석부를 펼칩니다...")
+print("📚 한국과 미국의 진짜 1등 기업들만 불러옵니다...")
 
 # ==========================================
-# 🌟 핵심 포인트: 파일에서 코스피 900개 명단 읽어오기!
+# 🌟 변경된 부분: 인터넷에서 상위 150개 명단만 긁어오기!
 # ==========================================
 try:
-    # 깃허브 방에 올려둔 kospi_list.csv 파일을 읽어와! (숫자 0이 안 지워지게 dtype=str로 설정)
-    korea_df = pd.read_csv('kospi_list.csv', dtype={'Code': str})
-    
-    # 읽어온 표를 파이썬 리스트로 싹 변환하기
-    korea_tickers = korea_df['Code'].tolist()
-    korea_names = korea_df['Name'].tolist()
-    
-    # 딕셔너리로 만들기 (티커 뒤에 '.KS'를 붙여야 야후 파이낸스가 알아들어!)
+    # 한국: 시가총액 상위 50개 (KOSPI 50) 가져오기!
+    print("🇰🇷 코스피 Top 50 명단 가져오는 중...")
+    kr_df = fdr.StockListing('KOSPI50')
     korea_stocks = {}
-    for i in range(len(korea_tickers)):
-        ticker = korea_tickers[i] + '.KS'
-        name = korea_names[i]
-        korea_stocks[ticker] = name
+    for index, row in kr_df.iterrows():
+        # 한국 주식은 티커 뒤에 .KS를 붙여야 야후가 알아먹어요
+        korea_stocks[row['Symbol'] + '.KS'] = row['Name']
         
-    print(f"🇰🇷 코스피 주식 {len(korea_stocks)}개 준비 완료!")
+    # 미국: 나스닥 상위 100개 (NASDAQ 100) 가져오기!
+    print("🇺🇸 나스닥 Top 100 명단 가져오는 중...")
+    us_df = fdr.StockListing('NASDAQ100')
+    us_stocks = {}
+    for index, row in us_df.iterrows():
+        us_stocks[row['Symbol']] = row['Name']
+        
 except Exception as e:
-    print("🚨 앗! kospi_list.csv 파일이 깃허브에 없거나 읽을 수 없어요. 파일을 꼭 올려주세요!")
-    korea_stocks = {} # 파일이 없으면 일단 빈칸으로 둠
+    print(f"🚨 명단 가져오기 실패! (에러: {e})")
+    exit() # 명단이 없으면 그냥 로봇을 재웁니다.
 
-# 미국 대장주 10개 (원하면 더 추가 가능!)
-us_stocks = {
-    'AAPL': '애플', 'MSFT': '마이크로소프트', 'NVDA': '엔비디아',
-    'GOOGL': '구글', 'AMZN': '아마존', 'META': '메타', 
-    'TSLA': '테슬라', 'AMD': 'AMD', 'NFLX': '넷플릭스', 'INTC': '인텔'
-}
-
-# 한국 900개 + 미국 10개를 하나의 거대한 바구니로 합치기!
+# 한국 50 + 미국 100 합치기 (총 150개!)
 all_stocks = {**korea_stocks, **us_stocks}
 
-print(f"🤖 총 {len(all_stocks)}개의 글로벌 주식 감시를 시작합니다!\n")
+print(f"🤖 엄선된 글로벌 대장주 {len(all_stocks)}개 감시를 시작합니다!\n")
 
-# 900개가 넘으니까 야후 파이낸스에서 데이터를 가져올 때 좀 더 안전하게 처리할게!
+# ==========================================
+# 3. 150개 주식 컨베이어 벨트 시작!
+# ==========================================
 for ticker, name in all_stocks.items():
     try:
         stock_data = yf.download(ticker, period='1y', progress=False)
@@ -67,41 +66,49 @@ for ticker, name in all_stocks.items():
             recent_10_low = stock_data['Low'].iloc[-10:].min().item()
             current_price = stock_data['Close'].iloc[-1].item()
             
-            # 🟢 [매수 조건] 20일선 + 200일선 + 거래량 10만 주! 
-            # (한국 코스피 전체를 감시하니까 거래량 기준을 50만에서 10만으로 살짝 낮췄어)
-            if (current_price >= recent_20_high) and (current_price > ma_200) and (today_volume >= 100000):
+            # 🟢 [매수 조건] 20일선 돌파 + 200일선 돌파 + 거래량 폭발!
+            # 대장주들이니까 거래량 기준을 100만 주로 깐깐하게 잡았어!
+            if (current_price >= recent_20_high) and (current_price > ma_200) and (today_volume >= 1000000):
                 buy_signals.append(f"{name}")
                 print(f"🚀 [발견!] {name}")
                 
+            # 🔴 [매도 조건] 10일 최저가 붕괴
             elif current_price <= recent_10_low:
                 sell_signals.append(f"{name}")
                 
     except Exception as e:
         pass # 에러 나면 조용히 패스
         
-    time.sleep(0.5) # 경찰 피해서 0.5초씩 휴식 (900개니까 총 7~10분 정도 걸려!)
+    time.sleep(0.5) # 150개니까 금방 끝나요!
 
-print(f"\n✅ 글로벌 검사 끝! 살 주식 {len(buy_signals)}개 발견.")
+print(f"\n✅ 150개 검사 끝! 살 주식 {len(buy_signals)}개 발견.")
 
-# 4. 제미나이에게 보고서 쓰라고 시키기!
+# ==========================================
+# 4. 제미나이 보고서 작성 및 디스코드 전송
+# ==========================================
 if len(buy_signals) > 0 or len(sell_signals) > 0:
     prompt = f"""
-    너는 12살도 이해하기 쉽게 설명해주는 글로벌 퀀트 투자 비서야.
-    오늘 한국 코스피 900개와 미국 대장주를 모두 싹쓸이 검사했어.
+    너는 12살도 이해하기 쉽게 설명해주는 최고의 퀀트 투자 비서야.
+    오늘 한국 코스피 Top 50, 미국 나스닥 Top 100 대장주만 엄선해서 검사했어.
     
-    - 🟢 매수 추천 (200일선 뚫고 폭발하는 대장주!): {buy_signals if buy_signals else '없음'}
+    - 🟢 매수 추천 (200일선 뚫고 폭발하는 초특급 우량주!): {buy_signals if buy_signals else '없음'}
     - 🔴 매도 경고 (10일 최저가 깨져서 도망쳐야 할 주식): {sell_signals if sell_signals else '없음'}
     
-    이 결과를 바탕으로 디스코드 알림 메시지를 흥미진진하게 작성해줘! (이모티콘 팍팍!)
+    이 결과를 바탕으로 디스코드 알림 메시지를 작성해줘. 이모티콘 듬뿍 넣어서!
     """
     
+    # 💥 리미트 에러 방지 팁! 여기서 무거운 2.0 대신 빠르고 가벼운 1.5를 쓰면 에러 확률이 훨씬 줄어들어.
     response = client.models.generate_content(
-        model='gemini-2.0-flash',
+        model='gemini-1.5-flash', 
         contents=prompt,
     )
     
-    message_data = {"content": f"🌍 **코스피 전체 장악! 터틀 로봇** 🌍\n{response.text}"}
+    message_data = {"content": f"💎 **한/미 Top 150 엄선 브리핑** 💎\n{response.text}"}
     requests.post(DISCORD_WEBHOOK_URL, data=message_data)
-    print("디스코드로 글로벌 알림 쏘기 성공! 👏")
+    print("디스코드 알림 발사 성공! 👏")
+    
 else:
     print("오늘은 살만한 주식이 없네요! 😴")
+    # 조건에 맞는 주식이 없어도 매일 생존 신고를 합니다.
+    message_data = {"content": "💎 **한/미 Top 150 엄선 브리핑** 💎\n주인님! 오늘 한국과 미국의 1등 기업 150개를 전부 검사했지만, 깐깐한 조건에 완벽히 맞는 주식이 단 한 개도 없습니다. 무리해서 사지 말고 푹 쉬세요! 😴"}
+    requests.post(DISCORD_WEBHOOK_URL, data=message_data)
