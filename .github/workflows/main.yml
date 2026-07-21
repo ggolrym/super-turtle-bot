@@ -3,7 +3,7 @@ name: 슈퍼 터틀 알림 봇
 on:
   schedule:
     # 월~금 한국 시간 아침 9시마다 자동 실행!
-    - cron: '0 0 * * 1-5' 
+    - cron: '17 0 * * 1-5' 
   workflow_dispatch: 
 
 jobs:
