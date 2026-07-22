@@ -1,15 +1,15 @@
 # ==========================================
-# 🐢 AI 터틀 트레이딩 (ATR N값 탑재 + 실시간 수집 진화 버전)
+# 🐢 AI 터틀 트레이딩 (1,400개 풀스케일 + ATR 탑재)
 # ==========================================
 import os
 import yfinance as yf
 import pandas as pd
 import FinanceDataReader as fdr
 import requests
-from bs4 import BeautifulSoup
 from google import genai
 import time
 from datetime import datetime
+import random
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
@@ -23,81 +23,60 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 buy_signals = []
 sell_signals = []
 
-print("🔍 한국과 미국의 상위 50개 대장주 명단을 수집합니다...")
+print("🌊 1,400개의 거대한 글로벌 주식 바다로 출항합니다...")
 
 # ==========================================
-# 🇰🇷 1. 네이버 증권에서 코스피 실시간 Top 50 긁어오기
+# 1. 명단 수집 (코스피 전체 + S&P 500 전체)
 # ==========================================
-korea_stocks = {}
 try:
-    print("🇰🇷 코스피 명단 수집 중...")
-    url = "https://finance.naver.com/sise/sise_market_sum.naver?sosok=0"
-    res = requests.get(url, headers={'User-agent': 'Mozilla/5.0'})
-    soup = BeautifulSoup(res.text, 'html.parser')
-    
-    for a_tag in soup.select('table.type_2 tbody tr td a'):
-        if 'code=' in a_tag.get('href', ''):
-            name = a_tag.text.strip()
-            code = a_tag['href'].split('code=')[-1]
-            if code.isdigit():
-                korea_stocks[f"{code}.KS"] = name
-            if len(korea_stocks) >= 50:
-                break
-    print("✅ 코스피 Top 50 수집 완료!")
-except Exception as e:
-    print(f"🚨 한국 명단 수집 실패: {e}")
-
-# ==========================================
-# 🇺🇸 2. FinanceDataReader로 미국 S&P 500 상위 50개 안전하게 가져오기
-# (구글파이낸스/위키백과의 403 에러를 원천 차단하는 가장 견고한 방법)
-# ==========================================
-us_stocks = {}
-try:
-    print("🇺🇸 미국 S&P 대장주 명단 수집 중...")
-    # 시가총액 순으로 정렬된 S&P 500 명단을 가져와 상위 50개만 추출
-    sp500_df = fdr.StockListing('SP500').head(50)
-    for _, row in sp500_df.iterrows():
+    # 🇰🇷 한국: 깃허브에 있는 kospi_list.csv에서 '전체' 가져오기 (가위질 제거!)
+    kr_df = pd.read_csv('kospi_list.csv', dtype={'Symbol': str})
+    korea_stocks = {}
+    for index, row in kr_df.iterrows():
+        korea_stocks[row['Symbol'] + '.KS'] = row['Name']
+    print(f"🇰🇷 코스피 전체 {len(korea_stocks)}개 준비 완료!")
+        
+    # 🇺🇸 미국: S&P 500 '전체' 가져오기 (가위질 제거!)
+    us_df = fdr.StockListing('SP500')
+    us_stocks = {}
+    for index, row in us_df.iterrows():
         us_stocks[row['Symbol']] = row['Name']
-    print("✅ 미국 Top 50 수집 완료!")
+    print(f"🇺🇸 미국 S&P500 전체 {len(us_stocks)}개 준비 완료!")
+        
 except Exception as e:
-    print(f"🚨 미국 명단 수집 실패: {e}")
+    print(f"🚨 명단 수집 실패! (에러: {e})")
+    print("💡 kospi_list.csv 파일이 깃허브에 있는지 꼭 확인해주세요!")
+    exit()
 
 all_stocks = {**korea_stocks, **us_stocks}
-print(f"\n🤖 총 {len(all_stocks)}개 대장주에 대한 정밀 ATR(N값) 분석을 시작합니다!\n")
+print(f"\n🤖 총 {len(all_stocks)}개 대장주 정밀 검사를 시작합니다! (약 15분 소요 예상)\n")
 
 # ==========================================
-# 3. 100개 주식 컨베이어 벨트 (오리지널 터틀 규칙 적용)
+# 2. 1,400개 주식 컨베이어 벨트 (ATR 분석)
 # ==========================================
 for ticker, name in all_stocks.items():
     try:
         stock_data = yf.download(ticker, period='1y', progress=False)
         
         if len(stock_data) >= 200:
-            # 1. 기본 지표 계산
             recent_20_high = stock_data['High'].iloc[-20:].max().item()
             ma_200 = stock_data['Close'].rolling(window=200).mean().iloc[-1].item()
             today_volume = stock_data['Volume'].iloc[-1].item()
             recent_10_low = stock_data['Low'].iloc[-10:].min().item()
             current_price = stock_data['Close'].iloc[-1].item()
             
-            # 2. 터틀 트레이딩의 핵심: N값(ATR) 계산
-            # TR = max(당일고가-당일저가, abs(당일고가-전일종가), abs(당일저가-전일종가))
+            # 터틀 트레이딩 N값(ATR) 계산
             high_low = stock_data['High'] - stock_data['Low']
             high_close = (stock_data['High'] - stock_data['Close'].shift(1)).abs()
             low_close = (stock_data['Low'] - stock_data['Close'].shift(1)).abs()
-            
-            # pandas.concat으로 수정하여 DeprecationWarning 방지
             tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-            
-            # ATR (20일 이동평균)
             atr = tr.rolling(window=20).mean()
             current_n = atr.iloc[-1].item()
             
-            # 🟢 [매수 조건] 20일선 + 200일선 + 거래량 100만 주!
+            # 🟢 [매수 조건] 20일선 + 200일선 + 거래량 100만 주
             if (current_price >= recent_20_high) and (current_price > ma_200) and (today_volume >= 1000000):
-                # N값을 함께 기록하여 리스크 관리에 활용할 수 있도록 함
                 buy_signals.append(f"{name} (현재가: {current_price:.2f}, N값: {current_n:.2f})")
-                print(f"🚀 [매수 신호] {name} - N값: {current_n:.2f}")
+                print(f"🚀 [매수 신호] {name}")
                 
             # 🔴 [매도 조건] 10일 최저가 붕괴
             elif current_price <= recent_10_low:
@@ -106,36 +85,49 @@ for ticker, name in all_stocks.items():
     except Exception as e:
         pass 
         
-    time.sleep(0.5) 
+    # 🌟 안전장치 1: 야후 파이낸스 경찰 피하기 (1400개니까 0.6초로 살짝 늘림)
+    time.sleep(0.6) 
 
-print(f"\n✅ 실시간 검사 끝! 매수 신호 {len(buy_signals)}개 발견.")
+print(f"\n✅ 1,400개 검사 끝! 매수 신호 {len(buy_signals)}개 발견.")
 
 # ==========================================
-# 4. 제미나이 퀀트 리포트 작성 및 디스코드 전송
+# 3. 브리핑 작성 및 전송 (과부하 방지 컷오프)
 # ==========================================
 if len(buy_signals) > 0 or len(sell_signals) > 0:
-    # 봇의 프롬프트를 좀 더 전문적인 퀀트 비서의 톤으로 업그레이드
+    
+    # 🌟 안전장치 2: 디스코드 글자 수 초과 방지 (신호가 너무 많으면 상위 20개만 자르기)
+    if len(buy_signals) > 20:
+        buy_signals = buy_signals[:20] + ["... (너무 많아서 20개까지만 표시)"]
+    if len(sell_signals) > 20:
+        sell_signals = sell_signals[:20] + ["... (너무 많아서 20개까지만 표시)"]
+
     prompt = f"""
     너는 데이터를 기반으로 냉철하게 분석하는 전문 퀀트 투자 비서야.
-    오늘 한국 코스피 Top 50, 미국 대장주 Top 50을 오리지널 터틀 트레이딩 기법(ATR 기반)으로 분석했어.
+    오늘 한국 코스피 전체, 미국 S&P500 전체 (총 1,400개)를 오리지널 터틀 트레이딩 기법으로 샅샅이 뒤졌어.
     
     - 🟢 시스템1 매수 신호 (20일 고점 돌파 + 200일선 지지): {buy_signals if buy_signals else '없음'}
     - 🔴 매도 및 손절 신호 (10일 저점 이탈): {sell_signals if sell_signals else '없음'}
     
-    이 결과를 바탕으로 디스코드 브리핑 메시지를 작성해줘. 
-    매수 신호가 발생한 종목은 N값(변동성)을 바탕으로 자금 관리(Position Sizing)의 중요성도 짧게 언급해줘.
+    이 결과를 바탕으로 디스코드 브리핑 메시지를 아주 프로페셔널하게 작성해줘. 
     """
     
-    response = client.models.generate_content(
-        model='gemini-1.5-flash', 
-        contents=prompt,
-    )
+    # 🌟 안전장치 3: 1400개를 처리하느라 지친 깃허브를 위해 제미나이 호출 3회 재시도 기능 추가
+    for attempt in range(3):
+        try:
+            response = client.models.generate_content(
+                model='gemini-1.5-flash', 
+                contents=prompt,
+            )
+            break # 성공하면 멈춤
+        except Exception as e:
+            print(f"제미나이 호출 실패... {attempt+1}차 재시도 중 ({e})")
+            time.sleep(5)
     
-    message_data = {"content": f"📈 **오리지널 터틀 퀀트 리포트** 📈\n{response.text}"}
+    message_data = {"content": f"🌊 **글로벌 풀스케일 퀀트 리포트 (1,400 종목)** 🌊\n{response.text}"}
     requests.post(DISCORD_WEBHOOK_URL, data=message_data)
     print("디스코드 알림 발사 성공! 👏")
     
 else:
     print("오늘은 매수/매도 신호가 발생하지 않았습니다.")
-    message_data = {"content": "📈 **터틀 퀀트 브리핑** 📈\n오늘 실시간으로 한/미 대장주 100개를 분석한 결과, 터틀 시스템1에 부합하는 매수/매도 타점이 발생하지 않았습니다. 자본을 지키며 다음 추세를 기다리십시오."}
+    message_data = {"content": "🌊 **글로벌 풀스케일 퀀트 리포트 (1,400 종목)** 🌊\n오늘 무려 1,400개의 기업을 샅샅이 뒤졌지만, 터틀 시스템1에 완벽히 부합하는 타점이 발생하지 않았습니다. 총알을 아끼고 폭풍을 기다리십시오."}
     requests.post(DISCORD_WEBHOOK_URL, data=message_data)
