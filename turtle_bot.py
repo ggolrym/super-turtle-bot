@@ -33,7 +33,7 @@ try:
     kr_df = pd.read_csv('kospi_list.csv', dtype={'Symbol': str})
     korea_stocks = {}
     for index, row in kr_df.iterrows():
-        korea_stocks[row['Symbol'] + '.KS'] = row['Name']
+        korea_stocks[row['Code'] + '.KS'] = row['Name']
     print(f"🇰🇷 코스피 전체 {len(korea_stocks)}개 준비 완료!")
         
     # 🇺🇸 미국: S&P 500 '전체' 가져오기 (가위질 제거!)
