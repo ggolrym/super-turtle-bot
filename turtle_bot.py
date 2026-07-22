@@ -30,10 +30,10 @@ print("📚 한국 50개와 미국 100개 명단을 가위로 오려냅니다...
 # ==========================================
 try:
     # 🇰🇷 한국: 깃허브에 있는 kospi_list.csv에서 1등~50등까지만 자르기 (.head(50))
-    kr_df = pd.read_csv('kospi_list.csv', dtype={'Symbol': str}).head(50)
+    kr_df = pd.read_csv('kospi_list.csv', dtype={'Code': str}).head(50)
     korea_stocks = {}
     for index, row in kr_df.iterrows():
-        korea_stocks[row['Symbol'] + '.KS'] = row['Name']
+        korea_stocks[row['Code'] + '.KS'] = row['Name']
     print("🇰🇷 코스피 Top 50 가위질 완료!")
         
     # 🇺🇸 미국: 안전한 SP500 명단에서 1등~100등까지만 자르기 (.head(100))
