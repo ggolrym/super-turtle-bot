@@ -1,5 +1,5 @@
 # ==========================================
-# 🐢 AI 터틀 트레이딩 (1,400개 풀스케일 + ATR 탑재)
+# 🐢 AI 터틀 트레이딩 (1,400개 풀스케일 + 방탄 스마트 인식)
 # ==========================================
 import os
 import yfinance as yf
@@ -9,7 +9,6 @@ import requests
 from google import genai
 import time
 from datetime import datetime
-import random
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
@@ -26,29 +25,50 @@ sell_signals = []
 print("🌊 1,400개의 거대한 글로벌 주식 바다로 출항합니다...")
 
 # ==========================================
-# 1. 명단 수집 (코스피 전체 + S&P 500 전체)
+# 1. 방탄(Crash-proof) 명단 수집 
 # ==========================================
+korea_stocks = {}
 try:
-    # 🇰🇷 한국: 깃허브에 있는 kospi_list.csv에서 '전체' 가져오기 (가위질 제거!)
-    kr_df = pd.read_csv('kospi_list.csv', dtype={'Symbol': str})
-    korea_stocks = {}
+    kr_df = pd.read_csv('kospi_list.csv')
+    
+    # 🌟 스마트 인식: 이름표가 'Symbol'이든 'Code'든 상관없이, 무조건 1열과 2열을 가져옵니다!
+    col_sym = kr_df.columns[0] 
+    col_name = kr_df.columns[1]
+    
     for index, row in kr_df.iterrows():
-        korea_stocks[row['Code'] + '.KS'] = row['Name']
+        # 혹시 엑셀에서 '005930'이 그냥 '5930' 숫자로 저장됐어도, 앞에 0을 채워서 무조건 6자리(zfill)로 완벽 복원!
+        raw_code = str(row[col_sym]).replace('.0', '').strip()
+        ticker = raw_code.zfill(6) + '.KS'
+        name = str(row[col_name])
+        korea_stocks[ticker] = name
+        
     print(f"🇰🇷 코스피 전체 {len(korea_stocks)}개 준비 완료!")
-        
-    # 🇺🇸 미국: S&P 500 '전체' 가져오기 (가위질 제거!)
-    us_df = fdr.StockListing('SP500')
-    us_stocks = {}
-    for index, row in us_df.iterrows():
-        us_stocks[row['Symbol']] = row['Name']
-    print(f"🇺🇸 미국 S&P500 전체 {len(us_stocks)}개 준비 완료!")
-        
 except Exception as e:
-    print(f"🚨 명단 수집 실패! (에러: {e})")
-    print("💡 kospi_list.csv 파일이 깃허브에 있는지 꼭 확인해주세요!")
+    print(f"🚨 한국 명단 수집 실패: {e}")
+    print("💡 깃허브 첫 화면에 'kospi_list.csv' 파일이 진짜로 있는지 꼭 확인해주세요!")
+
+us_stocks = {}
+try:
+    us_df = fdr.StockListing('SP500')
+    
+    # 🌟 스마트 인식: 미국 쪽 이름표가 'Symbol'일 수도, 'Ticker'일 수도 있으니 안전하게 확인!
+    col_sym = 'Symbol' if 'Symbol' in us_df.columns else 'Ticker'
+    col_name = 'Name' if 'Name' in us_df.columns else us_df.columns[1]
+    
+    for index, row in us_df.iterrows():
+        us_stocks[str(row[col_sym])] = str(row[col_name])
+        
+    print(f"🇺🇸 미국 S&P500 전체 {len(us_stocks)}개 준비 완료!")
+except Exception as e:
+    print(f"🚨 미국 명단 수집 실패: {e}")
+
+# ------------------------------------------
+all_stocks = {**korea_stocks, **us_stocks}
+
+if len(all_stocks) == 0:
+    print("🚨 한/미 주식을 단 한 개도 가져오지 못했습니다. 파일이 없거나 도서관이 닫혔습니다!")
     exit()
 
-all_stocks = {**korea_stocks, **us_stocks}
 print(f"\n🤖 총 {len(all_stocks)}개 대장주 정밀 검사를 시작합니다! (약 15분 소요 예상)\n")
 
 # ==========================================
@@ -85,25 +105,23 @@ for ticker, name in all_stocks.items():
     except Exception as e:
         pass 
         
-    # 🌟 안전장치 1: 야후 파이낸스 경찰 피하기 (1400개니까 0.6초로 살짝 늘림)
-    time.sleep(0.6) 
+    time.sleep(0.6) # 경찰 피해서 0.6초 휴식
 
-print(f"\n✅ 1,400개 검사 끝! 매수 신호 {len(buy_signals)}개 발견.")
+print(f"\n✅ 글로벌 풀스케일 검사 끝! 매수 신호 {len(buy_signals)}개 발견.")
 
 # ==========================================
-# 3. 브리핑 작성 및 전송 (과부하 방지 컷오프)
+# 3. 브리핑 작성 및 전송 (과부하 방지)
 # ==========================================
 if len(buy_signals) > 0 or len(sell_signals) > 0:
     
-    # 🌟 안전장치 2: 디스코드 글자 수 초과 방지 (신호가 너무 많으면 상위 20개만 자르기)
     if len(buy_signals) > 20:
-        buy_signals = buy_signals[:20] + ["... (너무 많아서 20개까지만 표시)"]
+        buy_signals = buy_signals[:20] + ["... (종목이 너무 많아 상위 20개만 표시)"]
     if len(sell_signals) > 20:
-        sell_signals = sell_signals[:20] + ["... (너무 많아서 20개까지만 표시)"]
+        sell_signals = sell_signals[:20] + ["... (종목이 너무 많아 상위 20개만 표시)"]
 
     prompt = f"""
     너는 데이터를 기반으로 냉철하게 분석하는 전문 퀀트 투자 비서야.
-    오늘 한국 코스피 전체, 미국 S&P500 전체 (총 1,400개)를 오리지널 터틀 트레이딩 기법으로 샅샅이 뒤졌어.
+    오늘 한국 코스피 전체와 미국 S&P500 전체 명단을 오리지널 터틀 트레이딩 기법으로 샅샅이 뒤졌어.
     
     - 🟢 시스템1 매수 신호 (20일 고점 돌파 + 200일선 지지): {buy_signals if buy_signals else '없음'}
     - 🔴 매도 및 손절 신호 (10일 저점 이탈): {sell_signals if sell_signals else '없음'}
@@ -111,14 +129,14 @@ if len(buy_signals) > 0 or len(sell_signals) > 0:
     이 결과를 바탕으로 디스코드 브리핑 메시지를 아주 프로페셔널하게 작성해줘. 
     """
     
-    # 🌟 안전장치 3: 1400개를 처리하느라 지친 깃허브를 위해 제미나이 호출 3회 재시도 기능 추가
+    # 🌟 1400개를 처리하느라 지친 깃허브를 위해 제미나이 3회 재시도!
     for attempt in range(3):
         try:
             response = client.models.generate_content(
                 model='gemini-1.5-flash', 
                 contents=prompt,
             )
-            break # 성공하면 멈춤
+            break 
         except Exception as e:
             print(f"제미나이 호출 실패... {attempt+1}차 재시도 중 ({e})")
             time.sleep(5)
@@ -129,5 +147,5 @@ if len(buy_signals) > 0 or len(sell_signals) > 0:
     
 else:
     print("오늘은 매수/매도 신호가 발생하지 않았습니다.")
-    message_data = {"content": "🌊 **글로벌 풀스케일 퀀트 리포트 (1,400 종목)** 🌊\n오늘 무려 1,400개의 기업을 샅샅이 뒤졌지만, 터틀 시스템1에 완벽히 부합하는 타점이 발생하지 않았습니다. 총알을 아끼고 폭풍을 기다리십시오."}
+    message_data = {"content": "🌊 **글로벌 풀스케일 퀀트 리포트 (1,400 종목)** 🌊\n오늘 무려 1,400여 개의 기업을 샅샅이 뒤졌지만, 터틀 시스템1에 완벽히 부합하는 타점이 발생하지 않았습니다. 총알을 아끼고 폭풍을 기다리십시오."}
     requests.post(DISCORD_WEBHOOK_URL, data=message_data)
