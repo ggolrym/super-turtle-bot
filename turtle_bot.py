@@ -57,15 +57,20 @@ us_stocks = {}
 try:
     print("🇺🇸 위키백과 잠입 중...")
     url = 'https://en.wikipedia.org/wiki/S%26P_100'
-    tables = pd.read_html(url)
     
-    # 위키백과 페이지에 있는 여러 표 중에서 'Symbol(기호)'이 있는 진짜 주식 표 찾기
+    # 🌟 핵심 포인트: "저 로봇 아니고 크롬 브라우저 쓰는 사람이에요!" 라고 속이는 완벽한 가면 씌우기
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+    req = requests.get(url, headers=headers)
+    
+    # 가면을 쓰고 가져온 페이지를 판다스로 읽기!
+    tables = pd.read_html(req.text)
+    
     for table in tables:
         if 'Symbol' in table.columns:
             # 앞에서부터 50개만 딱 자르기
             df = table.head(50)
             for _, row in df.iterrows():
-                # 야후 파이낸스 검색을 위해 기호의 점(.)을 짝대기(-)로 바꿔줌 (예: BRK.B -> BRK-B)
+                # 야후 파이낸스 검색을 위해 기호의 점(.)을 짝대기(-)로 바꿔줌
                 symbol = str(row['Symbol']).replace('.', '-')
                 us_stocks[symbol] = row['Name']
             break
