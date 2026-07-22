@@ -133,9 +133,9 @@ if len(buy_signals) > 0 or len(sell_signals) > 0:
     for attempt in range(3):
         try:
             response = client.models.generate_content(
-                model='gemini-1.5-flash', 
-                contents=prompt,
-            )
+            model='gemini-2.0-flash',  # 👈 여기를 2.0으로 싹 바꿔줘!
+            contents=prompt,
+        )
             break 
         except Exception as e:
             print(f"제미나이 호출 실패... {attempt+1}차 재시도 중 ({e})")
