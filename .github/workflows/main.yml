@@ -1,30 +1,31 @@
-name: 슈퍼 터틀 알림 봇
+name: Super Turtle Alarm
 
 on:
   schedule:
-    # 월~금 한국 시간 아침 9시마다 자동 실행!
-    - cron: '17 0 * * 1-5' 
-  workflow_dispatch: 
+    # 영국 시간 00시 17분 = 한국 시간 아침 9시 17분 (월~금요일만 실행)
+    - cron: '17 0 * * 1-5'
+  workflow_dispatch: # 수동으로 누르는 버튼도 남겨둡니다.
 
 jobs:
-  run-turtle-bot:
+  build:
     runs-on: ubuntu-latest
 
     steps:
-    - name: 1. 내 창고에서 코드 가져오기
-      uses: actions/checkout@v3
+      - name: 1. 내 창고에서 로봇(코드) 꺼내오기
+        uses: actions/checkout@v3
 
-    - name: 2. 파이썬 설치하기
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
+      - name: 2. 파이썬(Python) 설치하기
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
 
-    - name: 3. 마법 도구 설치하기
-      run: |
-        pip install yfinance finance-datareader google-genai requests pandas beautifulsoup4 lxml
+      - name: 3. 마법 도구(라이브러리) 설치하기
+        run: |
+          pip install yfinance finance-datareader google-genai requests pandas beautifulsoup4 lxml
 
-    - name: 4. 로봇 실행!
-      env:
-        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-      run: python turtle_bot.py
+      - name: 4. 로봇 실행!
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          python turtle_bot.py
