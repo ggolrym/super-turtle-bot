@@ -133,7 +133,7 @@ if len(buy_signals) > 0 or len(sell_signals) > 0:
     for attempt in range(3):
         try:
             response = client.models.generate_content(
-            model='gemini-1.5-flash',  # 👈 여기를 2.0으로 싹 바꿔줘!
+            model='gemini-1.5-flash-8b',  # 👈 여기를 2.0으로 싹 바꿔줘!
             contents=prompt,
         )
             break 
