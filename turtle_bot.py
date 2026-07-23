@@ -110,7 +110,7 @@ for ticker, name in all_stocks.items():
 print(f"\n✅ 글로벌 풀스케일 검사 끝! 매수 신호 {len(buy_signals)}개 발견.")
 
 # ==========================================
-# 3. 브리핑 작성 및 전송 (과부하 방지)
+# 3. 브리핑 작성 및 전송 (안전망 플랜 B 탑재!)
 # ==========================================
 if len(buy_signals) > 0 or len(sell_signals) > 0:
     
@@ -129,19 +129,28 @@ if len(buy_signals) > 0 or len(sell_signals) > 0:
     이 결과를 바탕으로 디스코드 브리핑 메시지를 아주 프로페셔널하게 작성해줘. 
     """
     
-    # 🌟 1400개를 처리하느라 지친 깃허브를 위해 제미나이 3회 재시도!
+    # 🌟 안전망(Plan B) 준비: 제미나이가 실패할 경우를 대비해 빈 칸을 만들어 둡니다.
+    response_text = ""
+    
     for attempt in range(3):
         try:
             response = client.models.generate_content(
-            model='gemini-1.5-flash-8b',  # 👈 여기를 2.0으로 싹 바꿔줘!
-            contents=prompt,
-        )
+                # 내일 아침 자동 실행을 위해, 가장 똑똑한 2.0으로 다시 고정해둡니다!
+                model='gemini-2.0-flash', 
+                contents=prompt,
+            )
+            response_text = response.text # 성공하면 제미나이의 멋진 글을 담습니다.
             break 
         except Exception as e:
             print(f"제미나이 호출 실패... {attempt+1}차 재시도 중 ({e})")
             time.sleep(5)
+            
+    # 🌟 플랜 B 발동! 3번 다 실패해서 response_text가 여전히 빈 칸이라면?
+    if not response_text:
+        print("🚨 제미나이가 완전히 뻗었습니다! 플랜 B(원본 데이터 전송)를 가동합니다.")
+        response_text = f"⚠️ **AI 비서 휴식 중! (시스템 원본 데이터 전송)**\n\n🟢 **매수 신호:**\n{buy_signals}\n\n🔴 **매도 신호:**\n{sell_signals}\n\n(AI 할당량이 초과되어 로봇이 직접 원본 데이터를 전송했습니다.)"
     
-    message_data = {"content": f"🌊 **글로벌 풀스케일 퀀트 리포트 (1,400 종목)** 🌊\n{response.text}"}
+    message_data = {"content": f"🌊 **글로벌 풀스케일 퀀트 리포트 (1,400 종목)** 🌊\n{response_text}"}
     requests.post(DISCORD_WEBHOOK_URL, data=message_data)
     print("디스코드 알림 발사 성공! 👏")
     
