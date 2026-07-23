@@ -136,7 +136,7 @@ if len(buy_signals) > 0 or len(sell_signals) > 0:
         try:
             response = client.models.generate_content(
                 # 내일 아침 자동 실행을 위해, 가장 똑똑한 2.0으로 다시 고정해둡니다!
-                model='gemini-2.0-flash', 
+                model='gemini-1.5-flash-8b', 
                 contents=prompt,
             )
             response_text = response.text # 성공하면 제미나이의 멋진 글을 담습니다.
