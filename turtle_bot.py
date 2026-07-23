@@ -23,7 +23,7 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 # ==========================================
 # 💰 1. 퀀트 트레이더의 자금 및 필터 설정
 # ==========================================
-TOTAL_CAPITAL = 100000ㅔ # 총 투자금: 100만 원
+TOTAL_CAPITAL = 1000000 # 총 투자금: 100만 원
 RISK_PERCENT = 0.01      # 1회 매수 시 허용 리스크 (총 자산의 1%)
 RISK_AMOUNT = TOTAL_CAPITAL * RISK_PERCENT # 잃을 수 있는 최대 금액 (10만 원)
 MIN_TRADED_VALUE = 10000000000 # 최소 거래대금: 100억 원 (작전주 차단)
