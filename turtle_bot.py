@@ -103,16 +103,18 @@ for ticker, name in all_stocks.items():
             unit_size = math.floor(RISK_AMOUNT / N_krw)
             unit_size = 1 if unit_size == 0 else unit_size
             
-            # -----------------------------------
+           # -----------------------------------
             # 시스템 1 (20일 돌파 / 10일 이탈) 및 피라미딩
             # -----------------------------------
             if current_price >= high_20 and current_price > ma_200:
-                # 돌파가 대비 상승폭을 통해 피라미딩 단계 역산 (0.5N 단위)
                 price_diff = current_price - high_20
                 pyramid_stage = math.floor(price_diff / (0.5 * N)) + 1
                 
                 if pyramid_stage <= 4:
-                    signal_str = f"- [{name}] Sys1 {pyramid_stage}차 진입: {unit_size}주 매수 (기준: {high_20:.2f} / 현재가: {current_price:.2f})"
+                    # 🌟 손절가 계산 로직 추가 (돌파 기준가 - 2N)
+                    stop_loss_price = high_20 - (2 * N)
+                    
+                    signal_str = f"- [{name}] Sys1 {pyramid_stage}차 진입: {unit_size}주 매수 (기준: {high_20:.2f} / 현재가: {current_price:.2f} / 🛑 손절가: {stop_loss_price:.2f})"
                     buy_signals_sys1.append(signal_str)
                     
             elif current_price <= low_10:
@@ -126,7 +128,10 @@ for ticker, name in all_stocks.items():
                 pyramid_stage = math.floor(price_diff / (0.5 * N)) + 1
                 
                 if pyramid_stage <= 4:
-                    signal_str = f"- [{name}] Sys2 {pyramid_stage}차 진입: {unit_size}주 매수 (기준: {high_55:.2f} / 현재가: {current_price:.2f})"
+                    # 🌟 손절가 계산 로직 추가 (돌파 기준가 - 2N)
+                    stop_loss_price = high_55 - (2 * N)
+                    
+                    signal_str = f"- [{name}] Sys2 {pyramid_stage}차 진입: {unit_size}주 매수 (기준: {high_55:.2f} / 현재가: {current_price:.2f} / 🛑 손절가: {stop_loss_price:.2f})"
                     buy_signals_sys2.append(signal_str)
                     
             elif current_price <= low_20:
@@ -178,7 +183,7 @@ if buy_signals_sys1 or buy_signals_sys2 or sell_signals:
     if not response_text:
         response_text = f"**오류 발생 원본 데이터 전송**\n\n**Sys1**\n{sys1_text}\n\n**Sys2**\n{sys2_text}\n\n**청산**\n{sell_text}"
     
-    message_data = {"content": f"**터틀 시스템 v6.0 분석 리포트 (총자본 1,000만 원)**\n{response_text}"}
+    message_data = {"content": f"**터틀 시스템 v6.0 분석 리포트 (총자본 100만 원)**\n{response_text}"}
     requests.post(DISCORD_WEBHOOK_URL, data=message_data)
     
 else:
