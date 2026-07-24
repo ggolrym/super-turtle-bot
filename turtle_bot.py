@@ -22,7 +22,7 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 # ==========================================
 # 1. 자본 및 리스크 설정
 # ==========================================
-TOTAL_CAPITAL = 500000  # 총 투자금 50만 원
+TOTAL_CAPITAL = 500000   # 총 투자금 50만 원으로 수정
 RISK_PERCENT = 0.01      # 1회 최대 허용 리스크 (1%)
 RISK_AMOUNT = TOTAL_CAPITAL * RISK_PERCENT
 MIN_TURNOVER_KRW = 10000000000 # 최소 일일 거래대금 (100억 원)
@@ -178,7 +178,10 @@ if buy_signals_sys1 or buy_signals_sys2 or sell_signals:
         print("🚨 플랜 B 가동: 원본 데이터 디스코드 전송")
         response_text = f"**오류 발생 원본 데이터 전송**\n\n**Sys1**\n{sys1_text}\n\n**Sys2**\n{sys2_text}\n\n**청산**\n{sell_text}"
     
-    message_data = {"content": f"🐢 **터틀 시스템 v6.2 분석 리포트 (총자본 100만 원)** 🐢\n{response_text}"}
+   # 수정 전 (v6.2): f"🐢 **터틀 시스템 v6.2 분석 리포트 (총자본 100만 원)** 🐢\n{response_text}"
+    
+    # 수정 후 (자동 인식):
+    message_data = {"content": f"🐢 **터틀 시스템 v6.2 분석 리포트 (총자본 {TOTAL_CAPITAL:,}원)** 🐢\n{response_text}"}
     
     # 🌟 핵심: data= 대신 json= 을 사용하여 디스코드 400 에러를 원천 차단!
     res = requests.post(DISCORD_WEBHOOK_URL, json=message_data)
