@@ -22,7 +22,7 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 # ==========================================
 # 1. 자본 및 리스크 설정
 # ==========================================
-TOTAL_CAPITAL = 400000  # 총 투자금 40만 원
+TOTAL_CAPITAL = 500000  # 총 투자금 50만 원
 RISK_PERCENT = 0.01      # 1회 최대 허용 리스크 (1%)
 RISK_AMOUNT = TOTAL_CAPITAL * RISK_PERCENT
 MIN_TURNOVER_KRW = 10000000000 # 최소 일일 거래대금 (100억 원)
