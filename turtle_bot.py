@@ -28,7 +28,7 @@ RISK_AMOUNT = TOTAL_CAPITAL * RISK_PERCENT
 MIN_TURNOVER_KRW = 10000000000 # 최소 일일 거래대금 (100억 원)
 
 # 실시간 환율 (미국 주식 거래대금 및 N값 원화 환산용)
-exchange_rate = 1350
+exchange_rate = 1480
 try:
     ex_df = fdr.DataReader('USD/KRW')
     exchange_rate = ex_df['Close'].iloc[-1].item()
