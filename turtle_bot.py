@@ -22,10 +22,13 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 # ==========================================
 # 1. 자본 및 리스크 설정
 # ==========================================
-TOTAL_CAPITAL = 500000   # 총 투자금 50만 원으로 수정
+TOTAL_CAPITAL = 500000   # 총 투자금 50만 원
 RISK_PERCENT = 0.01      # 1회 최대 허용 리스크 (1%)
 RISK_AMOUNT = TOTAL_CAPITAL * RISK_PERCENT
 MIN_TURNOVER_KRW = 10000000000 # 최소 일일 거래대금 (100억 원)
+
+# 🌟 [신규 추가] 터틀 DNA 필터 (최소 변동성)
+MIN_VOLATILITY_RATIO = 1.5 # 하루 평균 변동폭(N)이 주가의 1.5% 이상인 종목만 타겟팅
 
 print(f"💰 터틀 시스템 가동: 총자본 {TOTAL_CAPITAL:,}원 (1Unit 리스크: {RISK_AMOUNT:,.0f}원)")
 
@@ -92,6 +95,7 @@ for ticker, name in all_stocks.items():
             low_20 = stock_data['Low'].iloc[-21:-1].min().item()
             ma_200 = stock_data['Close'].rolling(window=200).mean().iloc[-1].item()
             
+            # N값 (ATR) 계산
             high_low = stock_data['High'] - stock_data['Low']
             high_close = (stock_data['High'] - stock_data['Close'].shift(1)).abs()
             low_close = (stock_data['Low'] - stock_data['Close'].shift(1)).abs()
@@ -99,6 +103,14 @@ for ticker, name in all_stocks.items():
             atr = tr.rolling(window=20).mean()
             N = atr.iloc[-1].item()
             
+            # 🌟 [신규 추가] 터틀 적합도(변동성) 검사
+            # 주가 대비 N값의 비율(%)을 계산합니다.
+            volatility_ratio = (N / current_price) * 100
+            
+            # 변동성이 우리가 설정한 1.5%보다 작으면, 너무 무거운 주식이므로 패스!
+            if volatility_ratio < MIN_VOLATILITY_RATIO:
+                continue
+                
             N_krw = N if ticker.endswith('.KS') else N * exchange_rate
             unit_size = math.floor(RISK_AMOUNT / N_krw)
             unit_size = 1 if unit_size == 0 else unit_size
