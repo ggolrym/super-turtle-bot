@@ -1,5 +1,5 @@
 # ==========================================
-# 🐢 AI 터틀 트레이딩 v6.0 (System 1&2, 자금관리, 거래대금, 피라미딩 통합)
+# 🐢 AI 터틀 트레이딩 v6.2 (진행률 표시 및 JSON 전송 복구)
 # ==========================================
 import os
 import yfinance as yf
@@ -14,7 +14,7 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
 if not GEMINI_API_KEY or not DISCORD_WEBHOOK_URL:
-    print("API Key 또는 Webhook URL이 설정되지 않았습니다.")
+    print("🚨 금고에 API 키나 웹훅 URL이 없습니다!")
     exit()
 
 client = genai.Client(api_key=GEMINI_API_KEY)
@@ -22,25 +22,27 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 # ==========================================
 # 1. 자본 및 리스크 설정
 # ==========================================
-TOTAL_CAPITAL = 1000000 # 총 투자금 (100만 원)
+TOTAL_CAPITAL = 1000000  # 총 투자금 100만 원
 RISK_PERCENT = 0.01      # 1회 최대 허용 리스크 (1%)
 RISK_AMOUNT = TOTAL_CAPITAL * RISK_PERCENT
 MIN_TURNOVER_KRW = 10000000000 # 최소 일일 거래대금 (100억 원)
 
-# 실시간 환율 (미국 주식 거래대금 및 N값 원화 환산용)
-exchange_rate = 1480
+print(f"💰 터틀 시스템 가동: 총자본 {TOTAL_CAPITAL:,}원 (1Unit 리스크: {RISK_AMOUNT:,.0f}원)")
+
+exchange_rate = 1350
 try:
     ex_df = fdr.DataReader('USD/KRW')
     exchange_rate = ex_df['Close'].iloc[-1].item()
+    print(f"💱 실시간 환율 적용: 1달러 = {exchange_rate:,.2f}원")
 except Exception:
-    pass
+    print("⚠️ 실시간 환율 실패. 기본값 1,350원을 적용합니다.")
 
 buy_signals_sys1 = []
 buy_signals_sys2 = []
 sell_signals = []
 
 # ==========================================
-# 2. 명단 수집 (코스피 전체, S&P 500)
+# 2. 명단 수집 
 # ==========================================
 korea_stocks = {}
 try:
@@ -49,8 +51,9 @@ try:
     for _, row in kr_df.iterrows():
         ticker = str(row[col_sym]).replace('.0', '').strip().zfill(6) + '.KS'
         korea_stocks[ticker] = str(row[col_name])
+    print(f"🇰🇷 코스피 전체 {len(korea_stocks)}개 준비 완료!")
 except Exception:
-    pass
+    print("💡 kospi_list.csv 파일 로드 실패. 한국 주식 패스.")
 
 us_stocks = {}
 try:
@@ -59,10 +62,12 @@ try:
     col_name = 'Name' if 'Name' in us_df.columns else us_df.columns[1]
     for _, row in us_df.iterrows():
         us_stocks[str(row[col_sym])] = str(row[col_name])
+    print(f"🇺🇸 미국 S&P500 전체 {len(us_stocks)}개 준비 완료!")
 except Exception:
-    pass
+    print("🚨 미국 S&P 500 명단 로드 실패.")
 
 all_stocks = {**korea_stocks, **us_stocks}
+print(f"\n🤖 총 {len(all_stocks)}개 거대 유동성(100억 이상) 종목 정밀 검사 시작! (약 13분 소요)\n")
 
 # ==========================================
 # 3. 데이터 검증 및 터틀 로직 처리
@@ -75,22 +80,18 @@ for ticker, name in all_stocks.items():
             current_price = stock_data['Close'].iloc[-1].item()
             today_volume = stock_data['Volume'].iloc[-1].item()
             
-            # 거래대금 계산 (한국은 원화, 미국은 달러를 원화로 환산)
             turnover = current_price * today_volume
             turnover_krw = turnover if ticker.endswith('.KS') else turnover * exchange_rate
             
-            # 거래대금 100억 미만 종목 필터링 (작전주 및 유동성 부족 차단)
             if turnover_krw < MIN_TURNOVER_KRW:
                 continue
             
-            # 돌파 기준가 (과거 기준)
             high_20 = stock_data['High'].iloc[-21:-1].max().item()
             high_55 = stock_data['High'].iloc[-56:-1].max().item()
             low_10 = stock_data['Low'].iloc[-11:-1].min().item()
             low_20 = stock_data['Low'].iloc[-21:-1].min().item()
             ma_200 = stock_data['Close'].rolling(window=200).mean().iloc[-1].item()
             
-            # N값 (ATR) 계산
             high_low = stock_data['High'] - stock_data['Low']
             high_close = (stock_data['High'] - stock_data['Close'].shift(1)).abs()
             low_close = (stock_data['Low'] - stock_data['Close'].shift(1)).abs()
@@ -98,41 +99,32 @@ for ticker, name in all_stocks.items():
             atr = tr.rolling(window=20).mean()
             N = atr.iloc[-1].item()
             
-            # N값 원화 환산 및 Unit 산출
             N_krw = N if ticker.endswith('.KS') else N * exchange_rate
             unit_size = math.floor(RISK_AMOUNT / N_krw)
             unit_size = 1 if unit_size == 0 else unit_size
             
-           # -----------------------------------
-            # 시스템 1 (20일 돌파 / 10일 이탈) 및 피라미딩
-            # -----------------------------------
+            # --- Sys1 ---
             if current_price >= high_20 and current_price > ma_200:
                 price_diff = current_price - high_20
                 pyramid_stage = math.floor(price_diff / (0.5 * N)) + 1
-                
                 if pyramid_stage <= 4:
-                    # 🌟 손절가 계산 로직 추가 (돌파 기준가 - 2N)
                     stop_loss_price = high_20 - (2 * N)
-                    
-                    signal_str = f"- [{name}] Sys1 {pyramid_stage}차 진입: {unit_size}주 매수 (기준: {high_20:.2f} / 현재가: {current_price:.2f} / 🛑 손절가: {stop_loss_price:.2f})"
+                    signal_str = f"- [{name}] Sys1 {pyramid_stage}차 진입: {unit_size}주 매수 (현재: {current_price:.2f} / 손절가: {stop_loss_price:.2f})"
                     buy_signals_sys1.append(signal_str)
+                    print(f"🚀 [Sys1 포착] {name}")
                     
             elif current_price <= low_10:
                 sell_signals.append(f"- [{name}] Sys1 청산 (10일선 이탈)")
             
-            # -----------------------------------
-            # 시스템 2 (55일 돌파 / 20일 이탈) 및 피라미딩
-            # -----------------------------------
+            # --- Sys2 ---
             if current_price >= high_55 and current_price > ma_200:
                 price_diff = current_price - high_55
                 pyramid_stage = math.floor(price_diff / (0.5 * N)) + 1
-                
                 if pyramid_stage <= 4:
-                    # 🌟 손절가 계산 로직 추가 (돌파 기준가 - 2N)
                     stop_loss_price = high_55 - (2 * N)
-                    
-                    signal_str = f"- [{name}] Sys2 {pyramid_stage}차 진입: {unit_size}주 매수 (기준: {high_55:.2f} / 현재가: {current_price:.2f} / 🛑 손절가: {stop_loss_price:.2f})"
+                    signal_str = f"- [{name}] Sys2 {pyramid_stage}차 진입: {unit_size}주 매수 (현재: {current_price:.2f} / 손절가: {stop_loss_price:.2f})"
                     buy_signals_sys2.append(signal_str)
+                    print(f"🚀 [Sys2 포착] {name}")
                     
             elif current_price <= low_20:
                 if f"- [{name}] Sys1 청산 (10일선 이탈)" not in sell_signals:
@@ -146,9 +138,10 @@ for ticker, name in all_stocks.items():
 # ==========================================
 # 4. 브리핑 작성 및 전송
 # ==========================================
+print(f"\n✅ 검사 완료! (Sys1: {len(buy_signals_sys1)}건, Sys2: {len(buy_signals_sys2)}건, 청산: {len(sell_signals)}건)")
+
 if buy_signals_sys1 or buy_signals_sys2 or sell_signals:
     
-    # Discord 글자 수 제한 방지 (카테고리별 최대 10개 출력)
     sys1_text = '\n'.join(buy_signals_sys1[:10]) if buy_signals_sys1 else '신호 없음'
     sys2_text = '\n'.join(buy_signals_sys2[:10]) if buy_signals_sys2 else '신호 없음'
     sell_text = '\n'.join(sell_signals[:10]) if sell_signals else '신호 없음'
@@ -177,15 +170,25 @@ if buy_signals_sys1 or buy_signals_sys2 or sell_signals:
             )
             response_text = response.text 
             break 
-        except Exception:
+        except Exception as e:
+            print(f"⚠️ 제미나이 호출 실패... {attempt+1}차 재시도 중 ({e})")
             time.sleep(5)
             
     if not response_text:
+        print("🚨 플랜 B 가동: 원본 데이터 디스코드 전송")
         response_text = f"**오류 발생 원본 데이터 전송**\n\n**Sys1**\n{sys1_text}\n\n**Sys2**\n{sys2_text}\n\n**청산**\n{sell_text}"
     
-    message_data = {"content": f"**터틀 시스템 v6.0 분석 리포트 (총자본 100만 원)**\n{response_text}"}
-    requests.post(DISCORD_WEBHOOK_URL, data=message_data)
+    message_data = {"content": f"🐢 **터틀 시스템 v6.2 분석 리포트 (총자본 100만 원)** 🐢\n{response_text}"}
+    
+    # 🌟 핵심: data= 대신 json= 을 사용하여 디스코드 400 에러를 원천 차단!
+    res = requests.post(DISCORD_WEBHOOK_URL, json=message_data)
+    if res.status_code in [200, 204]:
+        print("🚀 디스코드 알림 발송 성공!")
+    else:
+        print(f"🚨 디스코드 발송 실패: {res.status_code} - {res.text}")
     
 else:
-    message_data = {"content": "**터틀 시스템 v6.0 분석 리포트**\n현재 거래대금 100억 원 이상 종목 중 시스템 1, 2 진입 및 청산 기준을 충족한 종목이 없습니다."}
-    requests.post(DISCORD_WEBHOOK_URL, data=message_data)
+    print("오늘의 진입/청산 신호가 없어 생존 신고만 보냅니다.")
+    message_data = {"content": "🐢 **터틀 시스템 v6.2 분석 리포트** 🐢\n현재 거래대금 100억 원 이상 종목 중 시스템 1, 2 진입 및 청산 기준을 충족한 종목이 없습니다."}
+    requests.post(DISCORD_WEBHOOK_URL, json=message_data)
+    print("🚀 디스코드 생존 신고 발송 성공!")
