@@ -22,20 +22,20 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 # ==========================================
 # 1. 자본 및 리스크 설정
 # ==========================================
-TOTAL_CAPITAL = 1000000  # 총 투자금 100만 원
+TOTAL_CAPITAL = 400000  # 총 투자금 40만 원
 RISK_PERCENT = 0.01      # 1회 최대 허용 리스크 (1%)
 RISK_AMOUNT = TOTAL_CAPITAL * RISK_PERCENT
 MIN_TURNOVER_KRW = 10000000000 # 최소 일일 거래대금 (100억 원)
 
 print(f"💰 터틀 시스템 가동: 총자본 {TOTAL_CAPITAL:,}원 (1Unit 리스크: {RISK_AMOUNT:,.0f}원)")
 
-exchange_rate = 1350
+exchange_rate = 1480
 try:
     ex_df = fdr.DataReader('USD/KRW')
     exchange_rate = ex_df['Close'].iloc[-1].item()
     print(f"💱 실시간 환율 적용: 1달러 = {exchange_rate:,.2f}원")
 except Exception:
-    print("⚠️ 실시간 환율 실패. 기본값 1,350원을 적용합니다.")
+    print("⚠️ 실시간 환율 실패. 기본값 1,480원을 적용합니다.")
 
 buy_signals_sys1 = []
 buy_signals_sys2 = []
