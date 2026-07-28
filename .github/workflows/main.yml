@@ -33,8 +33,13 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          # 🌟 [추가] 깃허브 시크릿에 등록한 증권사 키를 파이썬 코드에 주입
+          KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
+          KIS_APP_SECRET: ${{ secrets.KIS_APP_SECRET }}
+          KIS_ACCOUNT: ${{ secrets.KIS_ACCOUNT }}
         run: |
           python turtle_bot.py
+
 
       # 🌟 [핵심 추가] 작업이 끝난 후 portfolio.json 장부를 깃허브에 저장(Commit)
       - name: 5. Save Portfolio Memory
