@@ -91,7 +91,7 @@ def execute_order(ticker, qty, side="BUY", price=0.0):
 # ==========================================
 # 3. 리스크 및 포트폴리오 세팅
 # ==========================================
-TOTAL_CAPITAL = 5000000     
+TOTAL_CAPITAL = 500000    
 RISK_PERCENT = 0.02        
 RISK_AMOUNT = TOTAL_CAPITAL * RISK_PERCENT
 MIN_TURNOVER_KRW = 10000000000 
