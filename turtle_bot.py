@@ -1,5 +1,5 @@
 # ==========================================
-# 🐢 AI 멀티 에셋 터틀 봇 v7.2 (포트폴리오 총 위험 통제 탑재)
+# 🐢 AI 멀티 에셋 터틀 봇 v8.0 (한국투자증권 모의투자 자동매매 탑재)
 # ==========================================
 import os
 import yfinance as yf
@@ -11,17 +11,87 @@ import time
 import math
 import json 
 
+# 🌟 1. 환경 변수 로드 (API 키 및 시크릿)
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
+KIS_APP_KEY = os.environ.get("KIS_APP_KEY")
+KIS_APP_SECRET = os.environ.get("KIS_APP_SECRET")
+KIS_ACCOUNT = os.environ.get("KIS_ACCOUNT")
 
-if not GEMINI_API_KEY or not DISCORD_WEBHOOK_URL:
-    print("🚨 API 키나 웹훅 URL이 없습니다!")
+if not all([GEMINI_API_KEY, DISCORD_WEBHOOK_URL, KIS_APP_KEY, KIS_APP_SECRET, KIS_ACCOUNT]):
+    print("🚨 API 키 또는 깃허브 시크릿이 누락되었습니다! (증권사 키 확인 필수)")
     exit()
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
+# 🌟 2. 한국투자증권 API 통신 설정 (모의투자 서버)
+KIS_URL = "https://openapivts.koreainvestment.com:29443" # 모의투자 전용 도메인
+
+def get_kis_token():
+    """한국투자증권 서버에서 암호화 토큰 발급"""
+    url = f"{KIS_URL}/oauth2/tokenP"
+    headers = {"content-type": "application/json"}
+    body = {
+        "grant_type": "client_credentials",
+        "appkey": KIS_APP_KEY,
+        "appsecret": KIS_APP_SECRET
+    }
+    res = requests.post(url, headers=headers, data=json.dumps(body))
+    if res.status_code == 200:
+        return res.json().get("access_token")
+    else:
+        print(f"🚨 KIS 토큰 발급 실패: {res.text}")
+        return None
+
+# 글로벌 토큰 발급
+kis_token = get_kis_token()
+print("✅ 한국투자증권 API 통신 토큰 발급 완료!" if kis_token else "❌ 토큰 발급 실패. 자동매매 기능이 중지됩니다.")
+
+def execute_order(ticker, qty, side="BUY"):
+    """증권사 서버로 실제 매수/매도 주문을 쏘는 핵심 엔진"""
+    if not kis_token: return "❌ 토큰 없음"
+    
+    is_krw = ticker.endswith('.KS')
+    clean_ticker = ticker.replace('.KS', '')
+    
+    # 한국 주식과 해외 주식의 주문 TR_ID 및 URL 분기 처리
+    if is_krw:
+        url = f"{KIS_URL}/uapi/domestic-stock/v1/trading/order-cash"
+        tr_id = "VTTC0802U" if side == "BUY" else "VTTC0801U" # 모의투자 국내 매수/매도
+    else:
+        url = f"{KIS_URL}/uapi/overseas-stock/v1/trading/order"
+        tr_id = "VTTT1002U" if side == "BUY" else "VTTT1006U" # 모의투자 해외 매수/매도 (시장가)
+
+    headers = {
+        "Content-Type": "application/json; charset=utf-8",
+        "authorization": f"Bearer {kis_token}",
+        "appkey": KIS_APP_KEY,
+        "appsecret": KIS_APP_SECRET,
+        "tr_id": tr_id
+    }
+    
+    # 01: 시장가 주문 (국내/해외 동일)
+    body = {
+        "CANO": KIS_ACCOUNT[:8],
+        "ACNT_PRDT_CD": KIS_ACCOUNT[8:10] if len(KIS_ACCOUNT) >= 10 else "01",
+        "PDNO": clean_ticker,
+        "ORD_QTY": str(int(qty)),
+        "ORD_DVSN": "01" if is_krw else "00", # 한국 시장가 01, 미국 시장가 00 (증권사 정책에 따라 다를 수 있음)
+        "ORD_UNPR": "0" 
+    }
+    
+    try:
+        res = requests.post(url, headers=headers, data=json.dumps(body))
+        data = res.json()
+        if data.get("rt_cd") == "0":
+            return "✅ 주문 성공"
+        else:
+            return f"❌ 주문 실패 ({data.get('msg1')})"
+    except Exception as e:
+        return f"❌ 네트워크 에러 ({e})"
+
 # ==========================================
-# 1. 자본 및 리스크 한도 설정
+# 3. 자본 및 리스크 설정
 # ==========================================
 TOTAL_CAPITAL = 500000     
 RISK_PERCENT = 0.02        
@@ -29,13 +99,8 @@ RISK_AMOUNT = TOTAL_CAPITAL * RISK_PERCENT
 MIN_TURNOVER_KRW = 10000000000 
 MIN_VOLATILITY_RATIO = 1.5 
 PORTFOLIO_FILE = 'portfolio.json' 
-
-# 🌟 [핵심 추가] 오리지널 터틀 리스크 한도 (Heat Limit)
-MAX_TOTAL_UNITS = 12       # 계좌 전체를 통틀어 최대 12 Unit까지만 보유
-MAX_SECTOR_UNITS = 6       # 같은 섹터(예: 주식)는 최대 6 Unit까지만 보유
-
-print(f"💰 멀티 에셋 터틀 시스템 가동: 총자본 {TOTAL_CAPITAL:,}원 (1Unit: {RISK_AMOUNT:,.0f}원)")
-print(f"🛡️ 리스크 한도: 총 보유 {MAX_TOTAL_UNITS} Units / 섹터별 최대 {MAX_SECTOR_UNITS} Units")
+MAX_TOTAL_UNITS = 12       
+MAX_SECTOR_UNITS = 6       
 
 if os.path.exists(PORTFOLIO_FILE):
     with open(PORTFOLIO_FILE, 'r', encoding='utf-8') as f:
@@ -51,19 +116,16 @@ except Exception: pass
 
 buy_signals = []
 sell_signals = []
-skipped_signals = [] # 리스크 한도 초과로 매수를 보류한 기록
+skipped_signals = [] 
 
-# 🌟 [핵심 추가] 자산별 섹터 판별기
 def get_sector(ticker):
     if ticker == 'GLD': return 'Gold'
     elif ticker == 'TLT': return 'Bond'
     elif ticker == 'DBC': return 'Commodity'
     elif ticker == 'VNQ': return 'Real_Estate'
-    else: return 'Stock' # QQQ, SPY 및 모든 개별 주식은 'Stock'으로 묶음
+    else: return 'Stock'
 
-# ==========================================
-# 2. 명단 수집 
-# ==========================================
+# 명단 수집 
 all_stocks = {
     'QQQ': 'Invesco QQQ (나스닥 기술주)',
     'SPY': 'SPDR S&P 500 ETF (미국 대형주)',
@@ -87,16 +149,15 @@ try:
         if sym not in all_stocks: all_stocks[sym] = str(row[col_name])
 except Exception: pass
 
-# ==========================================
-# 3. 현재 포트폴리오 리스크(Heat) 계산
-# ==========================================
 current_total_units = sum(pos['units'] for pos in portfolio.values())
 current_sector_units = {'Stock': 0, 'Gold': 0, 'Bond': 0, 'Commodity': 0, 'Real_Estate': 0}
 for t, pos in portfolio.items():
     current_sector_units[get_sector(t)] += pos['units']
 
+print(f"\n🤖 총 {len(all_stocks)}개 자산 정밀 검사 시작!\n")
+
 # ==========================================
-# 4. 데이터 검증 및 터틀 로직 처리
+# 4. 데이터 검증 및 실제 API 주문 집행
 # ==========================================
 for ticker, name in all_stocks.items():
     try:
@@ -122,36 +183,38 @@ for ticker, name in all_stocks.items():
         sector = get_sector(ticker)
 
         # ------------------------------------------------
-        # 📂 A. 이미 장부에 있는 자산 (청산 & 불타기)
+        # 📂 A. 청산 및 불타기 (실제 API 매도/매수)
         # ------------------------------------------------
         if ticker in portfolio:
             pos = portfolio[ticker]
             low_10 = stock_data['Low'].iloc[-11:-1].min().item()
             
-            # 청산 로직
+            # 청산 로직 (API 시장가 매도)
             if current_price <= pos['stop_loss'] or current_price <= low_10:
-                sell_signals.append(f"- [{name}] 전량 청산 (현재: {current_price:.2f}) [📊 차트 보기]({chart_link})")
+                order_res = execute_order(ticker, pos['units'], side="SELL") # 🚀 증권사 매도 주문
+                sell_signals.append(f"- [{name}] 전량 청산 ({pos['units']}주) ➞ {order_res} [📊 차트]({chart_link})")
                 current_total_units -= pos['units']
                 current_sector_units[sector] -= pos['units']
                 del portfolio[ticker] 
                 continue
                 
-            # 불타기 로직 (리스크 한도 검사 포함)
+            # 불타기 로직 (API 시장가 매수)
             if pos['units'] < 4 and current_price >= pos['last_buy_price'] + (0.5 * N):
                 if current_total_units + 1 > MAX_TOTAL_UNITS:
                     skipped_signals.append(f"- [{name}] ⚠️ 총 Unit({MAX_TOTAL_UNITS}) 초과로 불타기 보류")
                 elif current_sector_units[sector] + 1 > MAX_SECTOR_UNITS:
-                    skipped_signals.append(f"- [{name}] ⚠️ {sector} 섹터 Unit({MAX_SECTOR_UNITS}) 초과로 불타기 보류")
+                    skipped_signals.append(f"- [{name}] ⚠️ {sector} 섹터 초과로 불타기 보류")
                 else:
-                    pos['units'] += 1
+                    order_res = execute_order(ticker, unit_size, side="BUY") # 🚀 증권사 매수 주문
+                    pos['units'] += unit_size
                     pos['last_buy_price'] = current_price
                     pos['stop_loss'] = current_price - (2 * N)
                     current_total_units += 1
                     current_sector_units[sector] += 1
-                    buy_signals.append(f"- [{name}] 🔥 {pos['units']}차 불타기: 1Unit 추가 매수 (손절가: {pos['stop_loss']:.2f}) [📊 차트 보기]({chart_link})")
+                    buy_signals.append(f"- [{name}] 🔥 {pos['units']}차 불타기 ({unit_size}주) ➞ {order_res} [📊 차트]({chart_link})")
 
         # ------------------------------------------------
-        # 📂 B. 장부에 없는 자산 (신규 진입)
+        # 📂 B. 신규 진입 (실제 API 매수)
         # ------------------------------------------------
         else:
             if current_price < stock_data['Close'].rolling(window=200).mean().iloc[-1].item(): continue
@@ -160,17 +223,17 @@ for ticker, name in all_stocks.items():
             if (N / current_price) * 100 < MIN_VOLATILITY_RATIO: continue
             
             if current_price >= stock_data['High'].iloc[-21:-1].max().item():
-                # 신규 진입 시 리스크 한도 검사
                 if current_total_units + 1 > MAX_TOTAL_UNITS:
                     skipped_signals.append(f"- [{name}] ⚠️ 총 Unit({MAX_TOTAL_UNITS}) 초과로 신규 매수 보류")
                 elif current_sector_units[sector] + 1 > MAX_SECTOR_UNITS:
-                    skipped_signals.append(f"- [{name}] ⚠️ {sector} 섹터 Unit({MAX_SECTOR_UNITS}) 초과로 신규 매수 보류")
+                    skipped_signals.append(f"- [{name}] ⚠️ {sector} 섹터 초과로 신규 매수 보류")
                 else:
+                    order_res = execute_order(ticker, unit_size, side="BUY") # 🚀 증권사 매수 주문
                     stop_loss_price = current_price - (2 * N)
-                    portfolio[ticker] = {'name': name, 'units': 1, 'last_buy_price': current_price, 'stop_loss': stop_loss_price}
+                    portfolio[ticker] = {'name': name, 'units': unit_size, 'last_buy_price': current_price, 'stop_loss': stop_loss_price}
                     current_total_units += 1
                     current_sector_units[sector] += 1
-                    buy_signals.append(f"- [{name}] ✨ 신규 1차 진입: {unit_size}주 매수 (손절가: {stop_loss_price:.2f}) [📊 차트 보기]({chart_link})")
+                    buy_signals.append(f"- [{name}] ✨ 신규 1차 진입 ({unit_size}주) ➞ {order_res} [📊 차트]({chart_link})")
 
     except Exception: pass
     time.sleep(0.3)
@@ -181,26 +244,24 @@ with open(PORTFOLIO_FILE, 'w', encoding='utf-8') as f:
 # ==========================================
 # 5. 브리핑 작성 및 전송
 # ==========================================
-print(f"\n✅ 검사 완료! (매수: {len(buy_signals)}건, 청산: {len(sell_signals)}건, 보류: {len(skipped_signals)}건)")
-
 if buy_signals or sell_signals or skipped_signals:
     buy_text = '\n'.join(buy_signals[:10]) if buy_signals else '신호 없음'
     sell_text = '\n'.join(sell_signals[:10]) if sell_signals else '신호 없음'
     skip_text = '\n'.join(skipped_signals[:5]) if skipped_signals else '보류 없음'
 
     prompt = f"""
-    아래는 리스크 한도(Sector Cap)가 탑재된 터틀 봇 v7.2의 결과입니다.
+    아래는 증권사 API 자동 매매가 연동된 터틀 봇 v8.0의 실제 주문 집행 결과입니다.
     
-    [신규 진입 및 불타기]
+    [신규 진입 및 불타기 내역]
     {buy_text}
     
-    [청산 및 손절]
+    [청산 및 손절 내역]
     {sell_text}
     
-    [리스크 한도 초과로 매수 보류된 종목]
+    [리스크 한도 초과로 진입 포기]
     {skip_text}
     
-    위 데이터를 바탕으로 객관적이고 논리적인 퀀트 브리핑 문서를 작성하십시오. 마크다운 링크 [📊 차트 보기](URL)는 원본 그대로 복사하십시오.
+    위 데이터를 바탕으로 간결하고 전문적인 트레이딩 브리핑을 작성하십시오. API 주문 성공/실패 여부를 명확히 강조하십시오. 마크다운 링크는 그대로 유지하십시오.
     """
     
     response_text = ""
@@ -211,10 +272,10 @@ if buy_signals or sell_signals or skipped_signals:
             break 
         except Exception: time.sleep(5)
             
-    if not response_text: response_text = f"**원본 데이터**\n\n**매수**\n{buy_text}\n\n**청산**\n{sell_text}\n\n**보류**\n{skip_text}"
+    if not response_text: response_text = f"**원본 데이터**\n\n**매수**\n{buy_text}\n\n**청산**\n{sell_text}"
     
-    final_content = f"🛡️ **철벽 방어 터틀 봇 v7.2 리포트** 🛡️\n{response_text}"
-    if len(final_content) > 1900: final_content = final_content[:1900] + "\n\n... (⚠️ 신호 초과로 요약됨)"
+    final_content = f"🤖 **무인 퀀트 자동매매 v8.0 결산 (모의투자)** 🤖\n{response_text}"
+    if len(final_content) > 1900: final_content = final_content[:1900] + "\n\n... (⚠️ 내용 요약됨)"
     requests.post(DISCORD_WEBHOOK_URL, json={"content": final_content})
 else:
-    requests.post(DISCORD_WEBHOOK_URL, json={"content": f"🛡️ **철벽 방어 터틀 봇 v7.2 리포트** 🛡️\n현재 계좌 총 {current_total_units}/{MAX_TOTAL_UNITS} Units 가동 중. 새로운 진입/청산 신호는 없습니다."})
+    requests.post(DISCORD_WEBHOOK_URL, json={"content": f"🤖 **무인 퀀트 자동매매 v8.0 가동 중 (모의투자)** 🤖\n현재 계좌 리스크 {current_total_units}/{MAX_TOTAL_UNITS} Units. 오늘 증권사 서버로 발송된 신규 주문은 없습니다."})
