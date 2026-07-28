@@ -1,5 +1,5 @@
 # ==========================================
-# 🐢 AI 멀티 에셋 터틀 봇 v7.1 (자본 50만 원 소액 실전형)
+# 🐢 AI 멀티 에셋 터틀 봇 v7.2 (포트폴리오 총 위험 통제 탑재)
 # ==========================================
 import os
 import yfinance as yf
@@ -21,24 +21,27 @@ if not GEMINI_API_KEY or not DISCORD_WEBHOOK_URL:
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 # ==========================================
-# 1. 자본 및 리스크 설정 (50만 원 세팅)
+# 1. 자본 및 리스크 한도 설정
 # ==========================================
-TOTAL_CAPITAL = 500000     # 총 투자금 50만 원
-RISK_PERCENT = 0.02        # 수익률 극대화를 위한 2% 리스크 세팅 (1회 최대 허용 손실: 1만 원)
+TOTAL_CAPITAL = 500000     
+RISK_PERCENT = 0.02        
 RISK_AMOUNT = TOTAL_CAPITAL * RISK_PERCENT
 MIN_TURNOVER_KRW = 10000000000 
 MIN_VOLATILITY_RATIO = 1.5 
 PORTFOLIO_FILE = 'portfolio.json' 
 
-print(f"💰 멀티 에셋 터틀 시스템 가동: 총자본 {TOTAL_CAPITAL:,}원 (1Unit 리스크: {RISK_AMOUNT:,.0f}원)")
+# 🌟 [핵심 추가] 오리지널 터틀 리스크 한도 (Heat Limit)
+MAX_TOTAL_UNITS = 12       # 계좌 전체를 통틀어 최대 12 Unit까지만 보유
+MAX_SECTOR_UNITS = 6       # 같은 섹터(예: 주식)는 최대 6 Unit까지만 보유
+
+print(f"💰 멀티 에셋 터틀 시스템 가동: 총자본 {TOTAL_CAPITAL:,}원 (1Unit: {RISK_AMOUNT:,.0f}원)")
+print(f"🛡️ 리스크 한도: 총 보유 {MAX_TOTAL_UNITS} Units / 섹터별 최대 {MAX_SECTOR_UNITS} Units")
 
 if os.path.exists(PORTFOLIO_FILE):
     with open(PORTFOLIO_FILE, 'r', encoding='utf-8') as f:
         portfolio = json.load(f)
-    print(f"📖 장부 로드 완료: 현재 {len(portfolio)}개 자산 보유 중")
 else:
     portfolio = {}
-    print("📖 새 장부를 펼쳤습니다. (보유 자산 없음)")
 
 exchange_rate = 1350
 try:
@@ -48,14 +51,20 @@ except Exception: pass
 
 buy_signals = []
 sell_signals = []
+skipped_signals = [] # 리스크 한도 초과로 매수를 보류한 기록
+
+# 🌟 [핵심 추가] 자산별 섹터 판별기
+def get_sector(ticker):
+    if ticker == 'GLD': return 'Gold'
+    elif ticker == 'TLT': return 'Bond'
+    elif ticker == 'DBC': return 'Commodity'
+    elif ticker == 'VNQ': return 'Real_Estate'
+    else: return 'Stock' # QQQ, SPY 및 모든 개별 주식은 'Stock'으로 묶음
 
 # ==========================================
-# 2. 멀티 에셋 통합 명단 수집 (주식 + 글로벌 매크로 ETF)
+# 2. 명단 수집 
 # ==========================================
-all_stocks = {}
-
-# A. 글로벌 매크로 멀티 에셋 ETF Pool (주식, 금, 채권, 원자재, 리츠)
-macro_assets = {
+all_stocks = {
     'QQQ': 'Invesco QQQ (나스닥 기술주)',
     'SPY': 'SPDR S&P 500 ETF (미국 대형주)',
     'GLD': 'SPDR Gold Shares (금 실물)',
@@ -63,31 +72,31 @@ macro_assets = {
     'DBC': 'Invesco DB Commodity Index (원자재 묶음)',
     'VNQ': 'Vanguard Real Estate ETF (미국 부동산 리츠)'
 }
-all_stocks.update(macro_assets)
-
-# B. 한국 코스피 종목 추가
 try:
     kr_df = pd.read_csv('kospi_list.csv')
     for _, row in kr_df.iterrows():
-        ticker = str(row.iloc[0]).replace('.0', '').strip().zfill(6) + '.KS'
-        all_stocks[ticker] = str(row.iloc[1])
+        all_stocks[str(row.iloc[0]).replace('.0', '').strip().zfill(6) + '.KS'] = str(row.iloc[1])
 except Exception: pass
 
-# C. 미국 S&P 500 종목 추가
 try:
     us_df = fdr.StockListing('SP500')
     col_sym = 'Symbol' if 'Symbol' in us_df.columns else 'Ticker'
     col_name = 'Name' if 'Name' in us_df.columns else us_df.columns[1]
     for _, row in us_df.iterrows():
         sym = str(row[col_sym])
-        if sym not in all_stocks:
-            all_stocks[sym] = str(row[col_name])
+        if sym not in all_stocks: all_stocks[sym] = str(row[col_name])
 except Exception: pass
 
-print(f"\n🤖 총 {len(all_stocks)}개 멀티 에셋 자산 정밀 검사 시작!\n")
+# ==========================================
+# 3. 현재 포트폴리오 리스크(Heat) 계산
+# ==========================================
+current_total_units = sum(pos['units'] for pos in portfolio.values())
+current_sector_units = {'Stock': 0, 'Gold': 0, 'Bond': 0, 'Commodity': 0, 'Real_Estate': 0}
+for t, pos in portfolio.items():
+    current_sector_units[get_sector(t)] += pos['units']
 
 # ==========================================
-# 3. 데이터 검증 및 터틀 로직 처리
+# 4. 데이터 검증 및 터틀 로직 처리
 # ==========================================
 for ticker, name in all_stocks.items():
     try:
@@ -107,83 +116,91 @@ for ticker, name in all_stocks.items():
         unit_size = math.floor(RISK_AMOUNT / N_krw)
         unit_size = 1 if unit_size == 0 else unit_size
 
-        if is_krw:
-            chart_link = f"https://finance.naver.com/item/fchart.naver?code={ticker.replace('.KS', '')}"
-        else:
-            chart_link = f"https://finance.yahoo.com/quote/{ticker}/chart"
+        if is_krw: chart_link = f"https://finance.naver.com/item/fchart.naver?code={ticker.replace('.KS', '')}"
+        else: chart_link = f"https://finance.yahoo.com/quote/{ticker}/chart"
+
+        sector = get_sector(ticker)
 
         # ------------------------------------------------
-        # 📂 A. 이미 장부에 있는 자산 (보유 포지션 관리)
+        # 📂 A. 이미 장부에 있는 자산 (청산 & 불타기)
         # ------------------------------------------------
         if ticker in portfolio:
             pos = portfolio[ticker]
-            
             low_10 = stock_data['Low'].iloc[-11:-1].min().item()
+            
+            # 청산 로직
             if current_price <= pos['stop_loss'] or current_price <= low_10:
-                sell_signals.append(f"- [{name}] 전량 청산 (현재: {current_price:.2f} / 사유: 손절 또는 추세 이탈) [📊 차트 보기]({chart_link})")
+                sell_signals.append(f"- [{name}] 전량 청산 (현재: {current_price:.2f}) [📊 차트 보기]({chart_link})")
+                current_total_units -= pos['units']
+                current_sector_units[sector] -= pos['units']
                 del portfolio[ticker] 
                 continue
                 
+            # 불타기 로직 (리스크 한도 검사 포함)
             if pos['units'] < 4 and current_price >= pos['last_buy_price'] + (0.5 * N):
-                pos['units'] += 1
-                pos['last_buy_price'] = current_price
-                pos['stop_loss'] = current_price - (2 * N)
-                buy_signals.append(f"- [{name}] 🔥 {pos['units']}차 불타기 진입: {unit_size}주 추가 매수 (현재: {current_price:.2f} / 새 손절가: {pos['stop_loss']:.2f}) [📊 차트 보기]({chart_link})")
+                if current_total_units + 1 > MAX_TOTAL_UNITS:
+                    skipped_signals.append(f"- [{name}] ⚠️ 총 Unit({MAX_TOTAL_UNITS}) 초과로 불타기 보류")
+                elif current_sector_units[sector] + 1 > MAX_SECTOR_UNITS:
+                    skipped_signals.append(f"- [{name}] ⚠️ {sector} 섹터 Unit({MAX_SECTOR_UNITS}) 초과로 불타기 보류")
+                else:
+                    pos['units'] += 1
+                    pos['last_buy_price'] = current_price
+                    pos['stop_loss'] = current_price - (2 * N)
+                    current_total_units += 1
+                    current_sector_units[sector] += 1
+                    buy_signals.append(f"- [{name}] 🔥 {pos['units']}차 불타기: 1Unit 추가 매수 (손절가: {pos['stop_loss']:.2f}) [📊 차트 보기]({chart_link})")
 
         # ------------------------------------------------
-        # 📂 B. 장부에 없는 자산 (신규 진입 검사)
+        # 📂 B. 장부에 없는 자산 (신규 진입)
         # ------------------------------------------------
         else:
-            ma_200 = stock_data['Close'].rolling(window=200).mean().iloc[-1].item()
-            if current_price < ma_200: continue
-                
-            today_volume = stock_data['Volume'].iloc[-1].item()
-            turnover_krw = (current_price * today_volume) if is_krw else (current_price * today_volume * exchange_rate)
+            if current_price < stock_data['Close'].rolling(window=200).mean().iloc[-1].item(): continue
+            turnover_krw = (current_price * stock_data['Volume'].iloc[-1].item()) if is_krw else (current_price * stock_data['Volume'].iloc[-1].item() * exchange_rate)
             if turnover_krw < MIN_TURNOVER_KRW: continue
-                
-            volatility_ratio = (N / current_price) * 100
-            if volatility_ratio < MIN_VOLATILITY_RATIO: continue
+            if (N / current_price) * 100 < MIN_VOLATILITY_RATIO: continue
             
-            high_20 = stock_data['High'].iloc[-21:-1].max().item()
-            
-            if current_price >= high_20:
-                stop_loss_price = current_price - (2 * N)
-                
-                portfolio[ticker] = {
-                    'name': name,
-                    'units': 1,
-                    'last_buy_price': current_price,
-                    'stop_loss': stop_loss_price
-                }
-                buy_signals.append(f"- [{name}] ✨ 신규 1차 진입: {unit_size}주 매수 (현재: {current_price:.2f} / 손절가: {stop_loss_price:.2f}) [📊 차트 보기]({chart_link})")
+            if current_price >= stock_data['High'].iloc[-21:-1].max().item():
+                # 신규 진입 시 리스크 한도 검사
+                if current_total_units + 1 > MAX_TOTAL_UNITS:
+                    skipped_signals.append(f"- [{name}] ⚠️ 총 Unit({MAX_TOTAL_UNITS}) 초과로 신규 매수 보류")
+                elif current_sector_units[sector] + 1 > MAX_SECTOR_UNITS:
+                    skipped_signals.append(f"- [{name}] ⚠️ {sector} 섹터 Unit({MAX_SECTOR_UNITS}) 초과로 신규 매수 보류")
+                else:
+                    stop_loss_price = current_price - (2 * N)
+                    portfolio[ticker] = {'name': name, 'units': 1, 'last_buy_price': current_price, 'stop_loss': stop_loss_price}
+                    current_total_units += 1
+                    current_sector_units[sector] += 1
+                    buy_signals.append(f"- [{name}] ✨ 신규 1차 진입: {unit_size}주 매수 (손절가: {stop_loss_price:.2f}) [📊 차트 보기]({chart_link})")
 
     except Exception: pass
     time.sleep(0.3)
 
-# 장부 저장
 with open(PORTFOLIO_FILE, 'w', encoding='utf-8') as f:
     json.dump(portfolio, f, indent=4, ensure_ascii=False)
 
 # ==========================================
-# 4. 브리핑 작성 및 전송
+# 5. 브리핑 작성 및 전송
 # ==========================================
-print(f"\n✅ 검사 완료! (신규/추가매수: {len(buy_signals)}건, 청산: {len(sell_signals)}건)")
+print(f"\n✅ 검사 완료! (매수: {len(buy_signals)}건, 청산: {len(sell_signals)}건, 보류: {len(skipped_signals)}건)")
 
-if buy_signals or sell_signals:
-    buy_text = '\n'.join(buy_signals[:15]) if buy_signals else '신호 없음'
-    sell_text = '\n'.join(sell_signals[:15]) if sell_signals else '신호 없음'
+if buy_signals or sell_signals or skipped_signals:
+    buy_text = '\n'.join(buy_signals[:10]) if buy_signals else '신호 없음'
+    sell_text = '\n'.join(sell_signals[:10]) if sell_signals else '신호 없음'
+    skip_text = '\n'.join(skipped_signals[:5]) if skipped_signals else '보류 없음'
 
     prompt = f"""
-    아래는 50만 원 자본으로 글로벌 멀티 에셋(주식, 금, 채권 등)을 동시 스캔하는 터틀 봇 v7.1의 포트폴리오 관리 결과입니다.
+    아래는 리스크 한도(Sector Cap)가 탑재된 터틀 봇 v7.2의 결과입니다.
     
-    [신규 진입 및 불타기 신호]
+    [신규 진입 및 불타기]
     {buy_text}
     
-    [청산 및 손절 신호]
+    [청산 및 손절]
     {sell_text}
     
-    위 데이터를 바탕으로 객관적이고 논리적인 퀀트 브리핑 문서를 작성하십시오. 감정적 표현을 배제하십시오.
-    마크다운 링크 형태인 [📊 차트 보기](URL) 부분은 글자를 훼손하지 말고 원본 그대로 복사해서 출력하십시오.
+    [리스크 한도 초과로 매수 보류된 종목]
+    {skip_text}
+    
+    위 데이터를 바탕으로 객관적이고 논리적인 퀀트 브리핑 문서를 작성하십시오. 마크다운 링크 [📊 차트 보기](URL)는 원본 그대로 복사하십시오.
     """
     
     response_text = ""
@@ -194,12 +211,10 @@ if buy_signals or sell_signals:
             break 
         except Exception: time.sleep(5)
             
-    if not response_text:
-        response_text = f"**오류 발생 원본 데이터 전송**\n\n**매수/불타기**\n{buy_text}\n\n**청산**\n{sell_text}"
+    if not response_text: response_text = f"**원본 데이터**\n\n**매수**\n{buy_text}\n\n**청산**\n{sell_text}\n\n**보류**\n{skip_text}"
     
-    final_content = f"🌐 **멀티 에셋 펀드 매니저 v7.1 리포트 (총자본 {TOTAL_CAPITAL:,}원)** 🌐\n{response_text}"
+    final_content = f"🛡️ **철벽 방어 터틀 봇 v7.2 리포트** 🛡️\n{response_text}"
     if len(final_content) > 1900: final_content = final_content[:1900] + "\n\n... (⚠️ 신호 초과로 요약됨)"
-
     requests.post(DISCORD_WEBHOOK_URL, json={"content": final_content})
 else:
-    requests.post(DISCORD_WEBHOOK_URL, json={"content": f"🌐 **멀티 에셋 펀드 매니저 v7.1 리포트 (총자본 {TOTAL_CAPITAL:,}원)** 🌐\n오늘 주식, 금, 채권 등 모든 자산 군에서 신규 진입이나 청산 신호가 없습니다. 기존 포지션을 유지합니다."})
+    requests.post(DISCORD_WEBHOOK_URL, json={"content": f"🛡️ **철벽 방어 터틀 봇 v7.2 리포트** 🛡️\n현재 계좌 총 {current_total_units}/{MAX_TOTAL_UNITS} Units 가동 중. 새로운 진입/청산 신호는 없습니다."})
