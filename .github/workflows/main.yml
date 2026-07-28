@@ -2,9 +2,12 @@ name: Super Turtle Alarm
 
 on:
   schedule:
-    # 🇬🇧 UTC 기준: 00시 13분 (한국 아침 9시 13분) - 덜 붐비는 시간으로 변경!
+    # 한국 아침 9시 13분
     - cron: '13 0 * * 1-5'
   workflow_dispatch: 
+  push: # 🌟 극약 처방: 코드를 저장(Commit)하면 그 즉시 무조건 1회 자동 실행!
+    branches:
+      - main # (만약 창고 기본 이름이 master라면 master로 적어주세요)
 
 jobs:
   build:
