@@ -93,7 +93,7 @@ def execute_order(ticker, qty, side="BUY"):
 # ==========================================
 # 3. 자본 및 리스크 설정
 # ==========================================
-TOTAL_CAPITAL = 5000000     
+TOTAL_CAPITAL = 10000000     
 RISK_PERCENT = 0.02        
 RISK_AMOUNT = TOTAL_CAPITAL * RISK_PERCENT
 MIN_TURNOVER_KRW = 10000000000 
@@ -108,7 +108,7 @@ if os.path.exists(PORTFOLIO_FILE):
 else:
     portfolio = {}
 
-exchange_rate = 1350
+exchange_rate = 1466
 try:
     ex_df = fdr.DataReader('USD/KRW')
     exchange_rate = ex_df['Close'].iloc[-1].item()
