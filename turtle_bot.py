@@ -1,5 +1,5 @@
 # ==========================================
-# 🐢 AI 터틀 트레이딩 v6.4 (200일선 절대 방어선 & 변동성 필터 탑재)
+# 🐢 AI 터틀 트레이딩 v6.5 (200일선 방어 + 변동성 필터 + 다이렉트 차트 링크)
 # ==========================================
 import os
 import yfinance as yf
@@ -68,7 +68,7 @@ all_stocks = {**korea_stocks, **us_stocks}
 print(f"\n🤖 총 {len(all_stocks)}개 종목 검사 시작! (200일선 및 유동성 필터링 중...)\n")
 
 # ==========================================
-# 3. 데이터 검증 및 터틀 로직 처리 (최적화)
+# 3. 데이터 검증 및 터틀 로직 처리
 # ==========================================
 for ticker, name in all_stocks.items():
     try:
@@ -78,8 +78,7 @@ for ticker, name in all_stocks.items():
             current_price = stock_data['Close'].iloc[-1].item()
             ma_200 = stock_data['Close'].rolling(window=200).mean().iloc[-1].item()
             
-            # 🛡️ [전술 1단계] 200일선 장기 추세 필터 (절대 방어선)
-            # 200일선 아래에 있는 녀석들은 아예 뒤도 안 돌아보고 패스합니다! (속도 대폭 향상)
+            # 🛡️ 200일선 장기 추세 필터 (방어선)
             if current_price < ma_200:
                 continue
                 
@@ -87,11 +86,9 @@ for ticker, name in all_stocks.items():
             turnover = current_price * today_volume
             turnover_krw = turnover if ticker.endswith('.KS') else turnover * exchange_rate
             
-            # 유동성 필터 (100억 미만 작전주 컷)
             if turnover_krw < MIN_TURNOVER_KRW:
                 continue
             
-            # 돌파 기준선 설정
             high_20 = stock_data['High'].iloc[-21:-1].max().item()
             high_55 = stock_data['High'].iloc[-56:-1].max().item()
             low_10 = stock_data['Low'].iloc[-11:-1].min().item()
@@ -105,31 +102,36 @@ for ticker, name in all_stocks.items():
             atr = tr.rolling(window=20).mean()
             N = atr.iloc[-1].item()
             
-            # 🧬 변동성 필터 (터틀 DNA 검사)
+            # 🧬 변동성 필터 (터틀 DNA)
             volatility_ratio = (N / current_price) * 100
             if volatility_ratio < MIN_VOLATILITY_RATIO:
                 continue
                 
-            # 자금 관리 (매수 수량 계산)
+            # 자금 관리 계산
             N_krw = N if ticker.endswith('.KS') else N * exchange_rate
             unit_size = math.floor(RISK_AMOUNT / N_krw)
             unit_size = 1 if unit_size == 0 else unit_size
             
-            # ⚔️ [전술 2단계] 20일 / 55일 고점 돌파 (매수 타이밍 포착)
-            # 이미 위에서 200일선 위라는 조건을 통과했으므로, 돌파만 확인하면 무조건 발사!
-            
+            # 🌟 [차트 링크 생성기] 한국 주식은 네이버, 미국 주식은 야후 금융으로 연결
+            if ticker.endswith('.KS'):
+                clean_code = ticker.replace('.KS', '')
+                chart_link = f"https://finance.naver.com/item/fchart.naver?code={clean_code}"
+            else:
+                chart_link = f"https://finance.yahoo.com/quote/{ticker}/chart"
+
+            # ⚔️ 매수/매도 타이밍 포착
             # --- Sys1 (단기 돌파) ---
             if current_price >= high_20:
                 price_diff = current_price - high_20
                 pyramid_stage = math.floor(price_diff / (0.5 * N)) + 1
                 if pyramid_stage <= 4:
                     stop_loss_price = high_20 - (2 * N)
-                    signal_str = f"- [{name}] Sys1 {pyramid_stage}차 진입: {unit_size}주 매수 (현재: {current_price:.2f} / 손절가: {stop_loss_price:.2f})"
+                    signal_str = f"- [{name}] Sys1 {pyramid_stage}차 진입: {unit_size}주 매수 (현재: {current_price:.2f} / 손절: {stop_loss_price:.2f}) [📊 차트 보기]({chart_link})"
                     buy_signals_sys1.append(signal_str)
                     print(f"🚀 [Sys1 포착] {name}")
                     
             elif current_price <= low_10:
-                sell_signals.append(f"- [{name}] Sys1 청산 (10일선 이탈)")
+                sell_signals.append(f"- [{name}] Sys1 청산 (10일선 이탈) [📊 차트 보기]({chart_link})")
             
             # --- Sys2 (장기 돌파) ---
             if current_price >= high_55:
@@ -137,13 +139,13 @@ for ticker, name in all_stocks.items():
                 pyramid_stage = math.floor(price_diff / (0.5 * N)) + 1
                 if pyramid_stage <= 4:
                     stop_loss_price = high_55 - (2 * N)
-                    signal_str = f"- [{name}] Sys2 {pyramid_stage}차 진입: {unit_size}주 매수 (현재: {current_price:.2f} / 손절가: {stop_loss_price:.2f})"
+                    signal_str = f"- [{name}] Sys2 {pyramid_stage}차 진입: {unit_size}주 매수 (현재: {current_price:.2f} / 손절: {stop_loss_price:.2f}) [📊 차트 보기]({chart_link})"
                     buy_signals_sys2.append(signal_str)
                     print(f"🚀 [Sys2 포착] {name}")
                     
             elif current_price <= low_20:
-                if f"- [{name}] Sys1 청산 (10일선 이탈)" not in sell_signals:
-                    sell_signals.append(f"- [{name}] Sys2 청산 (20일선 이탈)")
+                if f"- [{name}] Sys1 청산 (10일선 이탈) [📊 차트 보기]({chart_link})" not in sell_signals:
+                    sell_signals.append(f"- [{name}] Sys2 청산 (20일선 이탈) [📊 차트 보기]({chart_link})")
                 
     except Exception:
         pass 
@@ -163,6 +165,7 @@ if buy_signals_sys1 or buy_signals_sys2 or sell_signals:
 
     prompt = f"""
     아래는 총 자본 {TOTAL_CAPITAL:,}원을 기준으로 200일선 추세 필터, 1.5% 변동성 제한, 1 Unit 리스크 관리 시스템을 통과한 완벽한 매수/매도 타점입니다.
+    마크다운 링크 형태인 [📊 차트 보기](URL) 부분은 글자를 훼손하지 말고 원본 그대로 정확히 복사해서 출력하십시오.
     
     [시스템 1: 20일 돌파]
     {sys1_text}
@@ -193,7 +196,7 @@ if buy_signals_sys1 or buy_signals_sys2 or sell_signals:
         print("🚨 플랜 B 가동: 원본 데이터 디스코드 전송")
         response_text = f"**오류 발생 원본 데이터 전송**\n\n**Sys1**\n{sys1_text}\n\n**Sys2**\n{sys2_text}\n\n**청산**\n{sell_text}"
     
-    message_data = {"content": f"🐢 **터틀 시스템 v6.4 분석 리포트 (총자본 {TOTAL_CAPITAL:,}원)** 🐢\n{response_text}"}
+    message_data = {"content": f"🐢 **터틀 시스템 v6.5 분석 리포트 (총자본 {TOTAL_CAPITAL:,}원)** 🐢\n{response_text}"}
     
     res = requests.post(DISCORD_WEBHOOK_URL, json=message_data)
     if res.status_code in [200, 204]:
@@ -203,6 +206,6 @@ if buy_signals_sys1 or buy_signals_sys2 or sell_signals:
     
 else:
     print("오늘의 진입/청산 신호가 없어 생존 신고만 보냅니다.")
-    message_data = {"content": f"🐢 **터틀 시스템 v6.4 분석 리포트 (총자본 {TOTAL_CAPITAL:,}원)** 🐢\n현재 200일선 위에서 강한 변동성을 유지하며 시스템 돌파 기준을 충족한 종목이 없습니다. 관망을 유지합니다."}
+    message_data = {"content": f"🐢 **터틀 시스템 v6.5 분석 리포트 (총자본 {TOTAL_CAPITAL:,}원)** 🐢\n현재 200일선 위에서 강한 변동성을 유지하며 시스템 돌파 기준을 충족한 종목이 없습니다. 관망을 유지합니다."}
     requests.post(DISCORD_WEBHOOK_URL, json=message_data)
     print("🚀 디스코드 생존 신고 발송 성공!")
