@@ -1,0 +1,224 @@
+{
+    "MMM": {
+        "name": "3M",
+        "units": 1,
+        "last_buy_price": 178.22999572753906,
+        "stop_loss": 168.93299560546876
+    },
+    "AFL": {
+        "name": "Aflac",
+        "units": 1,
+        "last_buy_price": 126.55999755859375,
+        "stop_loss": 122.50199737548829
+    },
+    "ALL": {
+        "name": "Allstate",
+        "units": 1,
+        "last_buy_price": 261.2699890136719,
+        "stop_loss": 249.31698303222657
+    },
+    "AAPL": {
+        "name": "Apple Inc.",
+        "units": 1,
+        "last_buy_price": 336.9100036621094,
+        "stop_loss": 320.45799865722654
+    },
+    "BKR": {
+        "name": "Baker Hughes",
+        "units": 1,
+        "last_buy_price": 60.59000015258789,
+        "stop_loss": 56.81500015258789
+    },
+    "BALL": {
+        "name": "Ball Corporation",
+        "units": 1,
+        "last_buy_price": 64.66999816894531,
+        "stop_loss": 61.56599655151367
+    },
+    "BBY": {
+        "name": "Best Buy",
+        "units": 1,
+        "last_buy_price": 88.44999694824219,
+        "stop_loss": 83.40099868774413
+    },
+    "BX": {
+        "name": "Blackstone Inc.",
+        "units": 1,
+        "last_buy_price": 132.60000610351562,
+        "stop_loss": 124.39300918579102
+    },
+    "CTAS": {
+        "name": "Cintas",
+        "units": 1,
+        "last_buy_price": 210.97999572753906,
+        "stop_loss": 199.76399841308594
+    },
+    "CPAY": {
+        "name": "Corpay",
+        "units": 1,
+        "last_buy_price": 379.7099914550781,
+        "stop_loss": 357.7369842529297
+    },
+    "EMR": {
+        "name": "Emerson Electric",
+        "units": 1,
+        "last_buy_price": 149.3000030517578,
+        "stop_loss": 141.49800720214844
+    },
+    "EG": {
+        "name": "Everest Group",
+        "units": 1,
+        "last_buy_price": 389.3399963378906,
+        "stop_loss": 373.86200256347655
+    },
+    "EXPE": {
+        "name": "Expedia Group",
+        "units": 1,
+        "last_buy_price": 278.3699951171875,
+        "stop_loss": 258.2799957275391
+    },
+    "GD": {
+        "name": "General Dynamics",
+        "units": 1,
+        "last_buy_price": 389.1400146484375,
+        "stop_loss": 373.47124590018814
+    },
+    "GM": {
+        "name": "General Motors",
+        "units": 1,
+        "last_buy_price": 87.04000091552734,
+        "stop_loss": 82.18200149536133
+    },
+    "GPN": {
+        "name": "Global Payments",
+        "units": 1,
+        "last_buy_price": 84.05999755859375,
+        "stop_loss": 77.84700012207031
+    },
+    "HST": {
+        "name": "Host Hotels & Resorts",
+        "units": 1,
+        "last_buy_price": 24.969999313354492,
+        "stop_loss": 23.943439049935257
+    },
+    "HPQ": {
+        "name": "HP Inc.",
+        "units": 1,
+        "last_buy_price": 26.549999237060547,
+        "stop_loss": 24.685998725891114
+    },
+    "IP": {
+        "name": "International Paper",
+        "units": 1,
+        "last_buy_price": 42.40999984741211,
+        "stop_loss": 39.49300117492676
+    },
+    "JPM": {
+        "name": "JPMorgan Chase",
+        "units": 1,
+        "last_buy_price": 356.20001220703125,
+        "stop_loss": 341.5184778557843
+    },
+    "LH": {
+        "name": "Labcorp",
+        "units": 1,
+        "last_buy_price": 301.1700134277344,
+        "stop_loss": 285.49901428222654
+    },
+    "MET": {
+        "name": "MetLife",
+        "units": 1,
+        "last_buy_price": 95.19000244140625,
+        "stop_loss": 91.51100387573243
+    },
+    "PRU": {
+        "name": "Prudential Financial",
+        "units": 1,
+        "last_buy_price": 121.88999938964844,
+        "stop_loss": 117.24100112915039
+    },
+    "RJF": {
+        "name": "Raymond James Financial",
+        "units": 1,
+        "last_buy_price": 173.60000610351562,
+        "stop_loss": 164.96997936706654
+    },
+    "RTX": {
+        "name": "RTX Corporation",
+        "units": 1,
+        "last_buy_price": 218.4199981689453,
+        "stop_loss": 207.86399536132814
+    },
+    "ROST": {
+        "name": "Ross Stores",
+        "units": 1,
+        "last_buy_price": 243.35000610351562,
+        "stop_loss": 232.2620086669922
+    },
+    "SPG": {
+        "name": "Simon Property Group",
+        "units": 1,
+        "last_buy_price": 231.6699981689453,
+        "stop_loss": 223.31399993896486
+    },
+    "SJM": {
+        "name": "J.M. Smucker Company (The)",
+        "units": 1,
+        "last_buy_price": 121.05000305175781,
+        "stop_loss": 114.63500366210937
+    },
+    "SW": {
+        "name": "Smurfit Westrock",
+        "units": 1,
+        "last_buy_price": 50.09000015258789,
+        "stop_loss": 46.195001220703126
+    },
+    "STLD": {
+        "name": "Steel Dynamics",
+        "units": 1,
+        "last_buy_price": 250.27000427246094,
+        "stop_loss": 234.2464992238409
+    },
+    "TXT": {
+        "name": "Textron",
+        "units": 1,
+        "last_buy_price": 96.12999725341797,
+        "stop_loss": 91.5739974975586
+    },
+    "TRV": {
+        "name": "Travelers Companies (The)",
+        "units": 1,
+        "last_buy_price": 390.3500061035156,
+        "stop_loss": 371.77300720214845
+    },
+    "TSN": {
+        "name": "Tyson Foods",
+        "units": 1,
+        "last_buy_price": 60.709999084472656,
+        "stop_loss": 58.130998611450195
+    },
+    "VRSK": {
+        "name": "Verisk Analytics",
+        "units": 1,
+        "last_buy_price": 206.66000366210938,
+        "stop_loss": 193.02700500488282
+    },
+    "VZ": {
+        "name": "Verizon",
+        "units": 1,
+        "last_buy_price": 47.31999969482422,
+        "stop_loss": 44.466286030259106
+    },
+    "WRB": {
+        "name": "W. R. Berkley Corporation",
+        "units": 1,
+        "last_buy_price": 75.69999694824219,
+        "stop_loss": 72.32399673461914
+    },
+    "WTW": {
+        "name": "Willis Towers Watson",
+        "units": 1,
+        "last_buy_price": 302.6400146484375,
+        "stop_loss": 287.5742675673914
+    }
+}
