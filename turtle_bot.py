@@ -196,7 +196,14 @@ if buy_signals_sys1 or buy_signals_sys2 or sell_signals:
         print("🚨 플랜 B 가동: 원본 데이터 디스코드 전송")
         response_text = f"**오류 발생 원본 데이터 전송**\n\n**Sys1**\n{sys1_text}\n\n**Sys2**\n{sys2_text}\n\n**청산**\n{sell_text}"
     
-    message_data = {"content": f"🐢 **터틀 시스템 v6.5 분석 리포트 (총자본 {TOTAL_CAPITAL:,}원)** 🐢\n{response_text}"}
+    # 디스코드에 보낼 최종 메시지 세팅
+    final_content = f"🐢 **터틀 시스템 v6.5 분석 리포트 (총자본 {TOTAL_CAPITAL:,}원)** 🐢\n{response_text}"
+    
+    # ✂️ [신규 추가] 디스코드 2,000자 제한 방어선 (안전가위)
+    if len(final_content) > 1900:
+        final_content = final_content[:1900] + "\n\n... (⚠️ 앗! 신호가 너무 많아 디스코드 글자 수 제한으로 여기까지만 출력됩니다.)"
+
+    message_data = {"content": final_content}
     
     res = requests.post(DISCORD_WEBHOOK_URL, json=message_data)
     if res.status_code in [200, 204]:
