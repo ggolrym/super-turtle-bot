@@ -42,6 +42,9 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add portfolio.json
-          # 장부 파일이 변경되었을 때만 저장하도록 예외 처리
           git diff --quiet && git diff --staged --quiet || git commit -m "Update portfolio memory [skip ci]"
+          
+          # 🌟 [추가된 해결책] push 하기 전에 깃허브 서버의 최신 상태를 먼저 당겨와서 병합(rebase)합니다.
+          git pull --rebase origin main
+          
           git push
