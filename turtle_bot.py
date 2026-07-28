@@ -1,5 +1,5 @@
 # ==========================================
-# 🐢 AI 터틀 트레이딩 v6.2 (진행률 표시 및 JSON 전송 복구)
+# 🐢 AI 터틀 트레이딩 v6.4 (200일선 절대 방어선 & 변동성 필터 탑재)
 # ==========================================
 import os
 import yfinance as yf
@@ -14,7 +14,7 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
 if not GEMINI_API_KEY or not DISCORD_WEBHOOK_URL:
-    print("🚨 금고에 API 키나 웹훅 URL이 없습니다!")
+    print("🚨 API 키나 웹훅 URL이 없습니다!")
     exit()
 
 client = genai.Client(api_key=GEMINI_API_KEY)
@@ -26,19 +26,17 @@ TOTAL_CAPITAL = 500000   # 총 투자금 50만 원
 RISK_PERCENT = 0.01      # 1회 최대 허용 리스크 (1%)
 RISK_AMOUNT = TOTAL_CAPITAL * RISK_PERCENT
 MIN_TURNOVER_KRW = 10000000000 # 최소 일일 거래대금 (100억 원)
-
-# 🌟 [신규 추가] 터틀 DNA 필터 (최소 변동성)
-MIN_VOLATILITY_RATIO = 1.5 # 하루 평균 변동폭(N)이 주가의 1.5% 이상인 종목만 타겟팅
+MIN_VOLATILITY_RATIO = 1.5 # 터틀 DNA: 하루 변동성 1.5% 이상 종목만 타겟팅
 
 print(f"💰 터틀 시스템 가동: 총자본 {TOTAL_CAPITAL:,}원 (1Unit 리스크: {RISK_AMOUNT:,.0f}원)")
 
-exchange_rate = 1480
+exchange_rate = 1350
 try:
     ex_df = fdr.DataReader('USD/KRW')
     exchange_rate = ex_df['Close'].iloc[-1].item()
     print(f"💱 실시간 환율 적용: 1달러 = {exchange_rate:,.2f}원")
 except Exception:
-    print("⚠️ 실시간 환율 실패. 기본값 1,480원을 적용합니다.")
+    print("⚠️ 실시간 환율 로드 실패. 기본값 1,350원 적용.")
 
 buy_signals_sys1 = []
 buy_signals_sys2 = []
@@ -50,13 +48,11 @@ sell_signals = []
 korea_stocks = {}
 try:
     kr_df = pd.read_csv('kospi_list.csv')
-    col_sym, col_name = kr_df.columns[0], kr_df.columns[1]
     for _, row in kr_df.iterrows():
-        ticker = str(row[col_sym]).replace('.0', '').strip().zfill(6) + '.KS'
-        korea_stocks[ticker] = str(row[col_name])
-    print(f"🇰🇷 코스피 전체 {len(korea_stocks)}개 준비 완료!")
+        ticker = str(row.iloc[0]).replace('.0', '').strip().zfill(6) + '.KS'
+        korea_stocks[ticker] = str(row.iloc[1])
 except Exception:
-    print("💡 kospi_list.csv 파일 로드 실패. 한국 주식 패스.")
+    pass
 
 us_stocks = {}
 try:
@@ -65,15 +61,14 @@ try:
     col_name = 'Name' if 'Name' in us_df.columns else us_df.columns[1]
     for _, row in us_df.iterrows():
         us_stocks[str(row[col_sym])] = str(row[col_name])
-    print(f"🇺🇸 미국 S&P500 전체 {len(us_stocks)}개 준비 완료!")
 except Exception:
-    print("🚨 미국 S&P 500 명단 로드 실패.")
+    pass
 
 all_stocks = {**korea_stocks, **us_stocks}
-print(f"\n🤖 총 {len(all_stocks)}개 거대 유동성(100억 이상) 종목 정밀 검사 시작! (약 13분 소요)\n")
+print(f"\n🤖 총 {len(all_stocks)}개 종목 검사 시작! (200일선 및 유동성 필터링 중...)\n")
 
 # ==========================================
-# 3. 데이터 검증 및 터틀 로직 처리
+# 3. 데이터 검증 및 터틀 로직 처리 (최적화)
 # ==========================================
 for ticker, name in all_stocks.items():
     try:
@@ -81,19 +76,26 @@ for ticker, name in all_stocks.items():
         
         if len(stock_data) >= 200:
             current_price = stock_data['Close'].iloc[-1].item()
-            today_volume = stock_data['Volume'].iloc[-1].item()
+            ma_200 = stock_data['Close'].rolling(window=200).mean().iloc[-1].item()
             
+            # 🛡️ [전술 1단계] 200일선 장기 추세 필터 (절대 방어선)
+            # 200일선 아래에 있는 녀석들은 아예 뒤도 안 돌아보고 패스합니다! (속도 대폭 향상)
+            if current_price < ma_200:
+                continue
+                
+            today_volume = stock_data['Volume'].iloc[-1].item()
             turnover = current_price * today_volume
             turnover_krw = turnover if ticker.endswith('.KS') else turnover * exchange_rate
             
+            # 유동성 필터 (100억 미만 작전주 컷)
             if turnover_krw < MIN_TURNOVER_KRW:
                 continue
             
+            # 돌파 기준선 설정
             high_20 = stock_data['High'].iloc[-21:-1].max().item()
             high_55 = stock_data['High'].iloc[-56:-1].max().item()
             low_10 = stock_data['Low'].iloc[-11:-1].min().item()
             low_20 = stock_data['Low'].iloc[-21:-1].min().item()
-            ma_200 = stock_data['Close'].rolling(window=200).mean().iloc[-1].item()
             
             # N값 (ATR) 계산
             high_low = stock_data['High'] - stock_data['Low']
@@ -103,20 +105,21 @@ for ticker, name in all_stocks.items():
             atr = tr.rolling(window=20).mean()
             N = atr.iloc[-1].item()
             
-            # 🌟 [신규 추가] 터틀 적합도(변동성) 검사
-            # 주가 대비 N값의 비율(%)을 계산합니다.
+            # 🧬 변동성 필터 (터틀 DNA 검사)
             volatility_ratio = (N / current_price) * 100
-            
-            # 변동성이 우리가 설정한 1.5%보다 작으면, 너무 무거운 주식이므로 패스!
             if volatility_ratio < MIN_VOLATILITY_RATIO:
                 continue
                 
+            # 자금 관리 (매수 수량 계산)
             N_krw = N if ticker.endswith('.KS') else N * exchange_rate
             unit_size = math.floor(RISK_AMOUNT / N_krw)
             unit_size = 1 if unit_size == 0 else unit_size
             
-            # --- Sys1 ---
-            if current_price >= high_20 and current_price > ma_200:
+            # ⚔️ [전술 2단계] 20일 / 55일 고점 돌파 (매수 타이밍 포착)
+            # 이미 위에서 200일선 위라는 조건을 통과했으므로, 돌파만 확인하면 무조건 발사!
+            
+            # --- Sys1 (단기 돌파) ---
+            if current_price >= high_20:
                 price_diff = current_price - high_20
                 pyramid_stage = math.floor(price_diff / (0.5 * N)) + 1
                 if pyramid_stage <= 4:
@@ -128,8 +131,8 @@ for ticker, name in all_stocks.items():
             elif current_price <= low_10:
                 sell_signals.append(f"- [{name}] Sys1 청산 (10일선 이탈)")
             
-            # --- Sys2 ---
-            if current_price >= high_55 and current_price > ma_200:
+            # --- Sys2 (장기 돌파) ---
+            if current_price >= high_55:
                 price_diff = current_price - high_55
                 pyramid_stage = math.floor(price_diff / (0.5 * N)) + 1
                 if pyramid_stage <= 4:
@@ -159,7 +162,7 @@ if buy_signals_sys1 or buy_signals_sys2 or sell_signals:
     sell_text = '\n'.join(sell_signals[:10]) if sell_signals else '신호 없음'
 
     prompt = f"""
-    아래는 총 자본 {TOTAL_CAPITAL:,}원을 기준으로 1% 리스크(1 Unit) 로직, 일일 거래대금 100억 이상 필터, 그리고 0.5N 단위 피라미딩 추적이 적용된 결과입니다.
+    아래는 총 자본 {TOTAL_CAPITAL:,}원을 기준으로 200일선 추세 필터, 1.5% 변동성 제한, 1 Unit 리스크 관리 시스템을 통과한 완벽한 매수/매도 타점입니다.
     
     [시스템 1: 20일 돌파]
     {sys1_text}
@@ -170,7 +173,7 @@ if buy_signals_sys1 or buy_signals_sys2 or sell_signals:
     [청산 및 손절 신호]
     {sell_text}
     
-    위 데이터를 바탕으로 객관적이고 논리적인 퀀트 브리핑 문서를 작성하십시오. 감정적 표현을 배제하고 사실 전달에 집중하십시오.
+    위 데이터를 바탕으로 객관적이고 논리적인 퀀트 브리핑 문서를 작성하십시오. 감정적 표현을 배제하고 숫자에 집중하십시오.
     """
     
     response_text = ""
@@ -190,12 +193,8 @@ if buy_signals_sys1 or buy_signals_sys2 or sell_signals:
         print("🚨 플랜 B 가동: 원본 데이터 디스코드 전송")
         response_text = f"**오류 발생 원본 데이터 전송**\n\n**Sys1**\n{sys1_text}\n\n**Sys2**\n{sys2_text}\n\n**청산**\n{sell_text}"
     
-   # 수정 전 (v6.2): f"🐢 **터틀 시스템 v6.2 분석 리포트 (총자본 100만 원)** 🐢\n{response_text}"
+    message_data = {"content": f"🐢 **터틀 시스템 v6.4 분석 리포트 (총자본 {TOTAL_CAPITAL:,}원)** 🐢\n{response_text}"}
     
-    # 수정 후 (자동 인식):
-    message_data = {"content": f"🐢 **터틀 시스템 v6.2 분석 리포트 (총자본 {TOTAL_CAPITAL:,}원)** 🐢\n{response_text}"}
-    
-    # 🌟 핵심: data= 대신 json= 을 사용하여 디스코드 400 에러를 원천 차단!
     res = requests.post(DISCORD_WEBHOOK_URL, json=message_data)
     if res.status_code in [200, 204]:
         print("🚀 디스코드 알림 발송 성공!")
@@ -204,6 +203,6 @@ if buy_signals_sys1 or buy_signals_sys2 or sell_signals:
     
 else:
     print("오늘의 진입/청산 신호가 없어 생존 신고만 보냅니다.")
-    message_data = {"content": "🐢 **터틀 시스템 v6.2 분석 리포트** 🐢\n현재 거래대금 100억 원 이상 종목 중 시스템 1, 2 진입 및 청산 기준을 충족한 종목이 없습니다."}
+    message_data = {"content": f"🐢 **터틀 시스템 v6.4 분석 리포트 (총자본 {TOTAL_CAPITAL:,}원)** 🐢\n현재 200일선 위에서 강한 변동성을 유지하며 시스템 돌파 기준을 충족한 종목이 없습니다. 관망을 유지합니다."}
     requests.post(DISCORD_WEBHOOK_URL, json=message_data)
     print("🚀 디스코드 생존 신고 발송 성공!")
