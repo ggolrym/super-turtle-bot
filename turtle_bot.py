@@ -1,5 +1,5 @@
 # ==========================================
-# 🐢 AI 멀티 에셋 터틀 봇 v9.4.2 (극한의 조건 완화 / 테스트 폭주 모드)
+# 🐢 AI 멀티 에셋 터틀 봇 v9.4.3 (yfinance 버그 완벽 수정 + 폭주 모드)
 # ==========================================
 import os
 import yfinance as yf
@@ -95,17 +95,13 @@ def execute_order(ticker, qty, side="BUY", price=0.0):
     except Exception as e: return {"success": False, "msg": f"❌ 에러({e})"}
 
 # ==========================================
-# 🌟 3. 자본, 리스크 및 포트폴리오 세팅 (초극단적 완화)
+# 🌟 3. 포트폴리오 세팅 (폭주 모드 조건)
 # ==========================================
 TOTAL_CAPITAL = 5000000     
 RISK_PERCENT = 0.02        
 RISK_AMOUNT = TOTAL_CAPITAL * RISK_PERCENT
-
-# 🌟 [폭주 모드] 거래대금 필터 100억 ➞ 1억 원으로 대폭 하향 (거의 모든 주식 허용)
-MIN_TURNOVER_KRW = 100000000 
+MIN_TURNOVER_KRW = 100000000 # 1억 원
 PORTFOLIO_FILE = 'portfolio.json' 
-
-# 🌟 [폭주 모드] 포트폴리오 한도 30개로 대폭 확장
 MAX_TOTAL_UNITS = 30       
 MAX_SECTOR_UNITS = 15       
 
@@ -116,7 +112,7 @@ else: portfolio = {}
 exchange_rate = 1350
 try:
     ex_df = fdr.DataReader('USD/KRW')
-    exchange_rate = ex_df['Close'].iloc[-1].item()
+    exchange_rate = float(ex_df['Close'].iloc[-1])
 except Exception: pass
 
 buy_signals, sell_signals, skipped_signals = [], [], []
@@ -153,25 +149,35 @@ current_total_units = sum(pos['units'] for pos in portfolio.values())
 current_sector_units = {'Stock': 0, 'Gold': 0, 'Bond': 0, 'Commodity': 0, 'Real_Estate': 0, 'Inverse': 0}
 for t, pos in portfolio.items(): current_sector_units[get_sector(t)] += pos['units']
 
-print(f"\n🤖 총 {len(all_stocks)}개 자산 폭주 스캔 시작 (v9.4.2)!\n")
+print(f"\n🤖 총 {len(all_stocks)}개 자산 쾌속 스캔 시작 (v9.4.3 버그 픽스 완료)!\n")
 
 # ==========================================
-# 🌟 4. 데이터 검증 및 주문 집행 (극한의 액션)
+# 🌟 4. 데이터 검증 및 주문 집행
 # ==========================================
+error_count = 0 # 에러 추적용 변수
+
 if kis_token: 
     for ticker, name in all_stocks.items():
         try:
             stock_data = yf.download(ticker, period='1y', progress=False)
-            # 🌟 [폭주 모드] 최소 필요 일수를 단 한 달(20일)로 축소! 신규 상장주도 다 건드림
+            
+            # 🌟 [치명적 버그 수정 1] yfinance 최신 MultiIndex 구조 강제 평탄화
+            if isinstance(stock_data.columns, pd.MultiIndex):
+                stock_data.columns = stock_data.columns.get_level_values(0)
+                
             if len(stock_data) < 20: continue
                 
-            current_price = stock_data['Close'].iloc[-1].item()
+            # 🌟 [치명적 버그 수정 2] .item()을 안전한 float()으로 전면 교체
+            current_price = float(stock_data['Close'].iloc[-1])
             
             high_low = stock_data['High'] - stock_data['Low']
             high_close = (stock_data['High'] - stock_data['Close'].shift(1)).abs()
             low_close = (stock_data['Low'] - stock_data['Close'].shift(1)).abs()
             tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-            N = tr.rolling(window=20).mean().iloc[-1].item()
+            N = float(tr.rolling(window=20).mean().iloc[-1])
+            
+            # 🌟 [치명적 버그 수정 3] 변동성이 0이거나 데이터가 깨진(NaN) 종목 차단 (ZeroDivisionError 방지)
+            if pd.isna(N) or N <= 0: continue
             
             is_krw = ticker.endswith('.KS')
             N_krw = N if is_krw else N * exchange_rate
@@ -184,8 +190,7 @@ if kis_token:
             # 📂 A. 청산 및 불타기 로직
             if ticker in portfolio:
                 pos = portfolio[ticker]
-                # 🌟 [폭주 모드] 3일 저점 이탈 시 칼같이 손절 (엄청나게 잦은 매도 발생)
-                low_3 = stock_data['Low'].iloc[-4:-1].min().item()
+                low_3 = float(stock_data['Low'].iloc[-4:-1].min()) if len(stock_data) >= 4 else current_price
                 
                 if current_price <= pos['stop_loss'] or current_price <= low_3:
                     order_res = execute_order(ticker, pos['units'], side="SELL", price=current_price)
@@ -197,7 +202,6 @@ if kis_token:
                         del portfolio[ticker] 
                     continue
                     
-                # 🌟 [폭주 모드] 수익이 아주 조금만(0.1N) 나도 무지성 불타기 시전
                 if pos['units'] < 4 and current_price >= pos['last_buy_price'] + (0.1 * N):
                     if current_total_units + 1 > MAX_TOTAL_UNITS: skipped_signals.append(f"- [{name}] 총 Unit 초과 보류")
                     elif current_sector_units[sector] + 1 > MAX_SECTOR_UNITS: skipped_signals.append(f"- [{name}] {sector} 한도 초과")
@@ -214,28 +218,28 @@ if kis_token:
 
             # 📂 B. 신규 진입 로직
             else:
-                avg_volume = stock_data['Volume'].iloc[-21:-1].mean().item() if len(stock_data) >= 21 else stock_data['Volume'].mean().item()
+                avg_volume = float(stock_data['Volume'].iloc[-21:-1].mean()) if len(stock_data) >= 21 else float(stock_data['Volume'].mean())
                 turnover_krw = (current_price * avg_volume) * (1 if is_krw else exchange_rate)
                 if turnover_krw < MIN_TURNOVER_KRW: continue
                 
                 volatility_ratio = (N / current_price) * 100
                 
-                # 🌟 [폭주 모드] 추세 기준선 파괴: 20일(한 달)선만 넘으면 다 진입
-                is_above_20 = current_price >= stock_data['Close'].rolling(window=20).mean().iloc[-1].item() if len(stock_data) >= 20 else True
-                is_above_10 = current_price >= stock_data['Close'].rolling(window=10).mean().iloc[-1].item() if len(stock_data) >= 10 else True
+                is_above_20 = current_price >= float(stock_data['Close'].rolling(window=20).mean().iloc[-1]) if len(stock_data) >= 20 else True
+                is_above_10 = current_price >= float(stock_data['Close'].rolling(window=10).mean().iloc[-1]) if len(stock_data) >= 10 else True
                 
                 if sector == 'Stock':
-                    if not is_above_20: continue      # 20일선(한 달) 통과 시
-                    if volatility_ratio < 0.1: continue # 변동성 거의 무시
+                    if not is_above_20: continue      
+                    if volatility_ratio < 0.1: continue 
                 elif sector == 'Inverse':
-                    if not is_above_10: continue       # 10일선(2주) 통과 시
+                    if not is_above_10: continue       
                     if volatility_ratio < 0.1: continue 
                 else:
                     if not is_above_20: continue      
                     if volatility_ratio < 0.1: continue 
 
-                # 🌟 [폭주 모드] 방아쇠: 단 5일(1주일) 고점 돌파 시 즉각 발포! 
-                if current_price >= stock_data['High'].iloc[-6:-1].max().item():
+                recent_high = float(stock_data['High'].iloc[-6:-1].max()) if len(stock_data) >= 6 else float(stock_data['High'].max())
+                
+                if current_price >= recent_high:
                     if current_total_units + 1 > MAX_TOTAL_UNITS: skipped_signals.append(f"- [{name}] 총 Unit 초과로 보류")
                     elif current_sector_units[sector] + 1 > MAX_SECTOR_UNITS: skipped_signals.append(f"- [{name}] {sector} 한도 초과")
                     else:
@@ -248,8 +252,13 @@ if kis_token:
                             current_total_units += 1
                             current_sector_units[sector] += 1
 
-        except Exception: pass
-        # 속도 극대화를 위해 sleep 시간도 0.1초로 단축
+        except Exception as e: 
+            # 🌟 [치명적 버그 수정 4] 에러 발생 시 숨기지 않고 최대 5개까지 로그에 출력
+            error_count += 1
+            if error_count <= 5:
+                print(f"⚠️ [{ticker}] 데이터 처리 에러: {e}")
+            continue
+            
         time.sleep(0.1)
 
 with open(PORTFOLIO_FILE, 'w', encoding='utf-8') as f: json.dump(portfolio, f, indent=4, ensure_ascii=False)
@@ -257,14 +266,13 @@ with open(PORTFOLIO_FILE, 'w', encoding='utf-8') as f: json.dump(portfolio, f, i
 # ==========================================
 # 🌟 5. 브리핑 전송 (디스코드 + 구글 시트)
 # ==========================================
-# 쏟아지는 매매 내역을 감당하기 위해 최대 30개까지 출력 허용
 buy_text = '\n'.join(buy_signals[:30]) if buy_signals else '신호 없음'
 sell_text = '\n'.join(sell_signals[:30]) if sell_signals else '신호 없음'
 skip_text = '\n'.join(skipped_signals[:5]) if skipped_signals else '보류 없음'
 
 if buy_signals or sell_signals or skipped_signals:
     prompt = f"""
-    아래는 퀀트 봇 v9.4.2(폭주 액션 모드)의 체결 결과입니다. 
+    아래는 퀀트 봇 v9.4.3(버그 픽스 및 폭주 모드)의 체결 결과입니다. 
     체결 내역이 아주 많을 수 있으니, 매수와 청산을 구분하여 깔끔하게 요약하세요.
     주의: "거절/에러"가 포함된 종목은 계좌에 매수되지 않았음을 명시하세요.
     [매수] {buy_text}
@@ -279,11 +287,10 @@ if buy_signals or sell_signals or skipped_signals:
         except Exception: time.sleep(5)
             
     if not response_text: response_text = f"**매수**\n{buy_text}\n\n**청산**\n{sell_text}"
-    final_content = f"🤖 **터틀 펀드 v9.4.2 (테스트 폭주 모드)** 🤖\n{response_text}"
+    final_content = f"🤖 **터틀 펀드 v9.4.3 (테스트 폭주 모드)** 🤖\n{response_text}"
 else:
-    final_content = f"🤖 **터틀 펀드 v9.4.2 가동 중** 🤖\n계좌 리스크 {current_total_units}/{MAX_TOTAL_UNITS} Units. (폭주 모드임에도 매수할 종목이 없습니다.)"
+    final_content = f"🤖 **터틀 펀드 v9.4.3 가동 중** 🤖\n계좌 리스크 {current_total_units}/{MAX_TOTAL_UNITS} Units. (버그 수정 완료. 타점 대기 중)"
 
-# 메시지가 너무 길면 디스코드 에러가 나므로 자르기
 if len(final_content) > 1900: final_content = final_content[:1900] + "\n\n... (⚠️ 내역이 너무 많아 요약됨)"
 requests.post(DISCORD_WEBHOOK_URL, json={"content": final_content})
 
