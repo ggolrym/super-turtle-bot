@@ -1,5 +1,5 @@
 # ==========================================
-# 🐢 AI 멀티 에셋 터틀 봇 v9.0 (인버스 롱숏 + 구글 시트 통합)
+# 🐢 AI 멀티 에셋 터틀 봇 v9.2 (인버스 롱숏 + 우량주 120일선 최적화)
 # ==========================================
 import os
 import yfinance as yf
@@ -13,12 +13,13 @@ import json
 from datetime import datetime
 import pytz
 
+# 🌟 1. 환경 변수 로드 (API 키 및 시크릿)
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 KIS_APP_KEY = os.environ.get("KIS_APP_KEY")
 KIS_APP_SECRET = os.environ.get("KIS_APP_SECRET")
 KIS_ACCOUNT = os.environ.get("KIS_ACCOUNT")
-SHEET_WEBHOOK_URL = os.environ.get("SHEET_WEBHOOK_URL") # 구글 시트 웹훅
+SHEET_WEBHOOK_URL = os.environ.get("SHEET_WEBHOOK_URL") 
 
 if not all([GEMINI_API_KEY, DISCORD_WEBHOOK_URL, KIS_APP_KEY, KIS_APP_SECRET, KIS_ACCOUNT]):
     print("🚨 API 키 또는 깃허브 시크릿 누락!")
@@ -27,6 +28,7 @@ if not all([GEMINI_API_KEY, DISCORD_WEBHOOK_URL, KIS_APP_KEY, KIS_APP_SECRET, KI
 client = genai.Client(api_key=GEMINI_API_KEY)
 KIS_URL = "https://openapivts.koreainvestment.com:29443" 
 
+# 🌟 2. 한국투자증권 통신 모듈 (Timeout 방어막 탑재)
 def get_kis_token():
     url = f"{KIS_URL}/oauth2/tokenP"
     headers = {"content-type": "application/json"}
@@ -92,13 +94,12 @@ def execute_order(ticker, qty, side="BUY", price=0.0):
     except Exception: return f"❌ 네트워크 에러"
 
 # ==========================================
-# 자본 및 포트폴리오 세팅
+# 🌟 3. 자본, 리스크 및 포트폴리오 세팅
 # ==========================================
 TOTAL_CAPITAL = 5000000     
 RISK_PERCENT = 0.02        
 RISK_AMOUNT = TOTAL_CAPITAL * RISK_PERCENT
 MIN_TURNOVER_KRW = 10000000000 
-MIN_VOLATILITY_RATIO = 1.5 
 PORTFOLIO_FILE = 'portfolio.json' 
 MAX_TOTAL_UNITS = 12       
 MAX_SECTOR_UNITS = 6       
@@ -120,15 +121,15 @@ def get_sector(ticker):
     elif ticker == 'TLT': return 'Bond'
     elif ticker == 'DBC': return 'Commodity'
     elif ticker == 'VNQ': return 'Real_Estate'
-    elif ticker in ['SH', 'PSQ']: return 'Inverse' # 🌟 인버스 섹터 추가
+    elif ticker in ['SH', 'PSQ']: return 'Inverse' 
     else: return 'Stock'
 
 all_stocks = {
     'QQQ': 'Invesco QQQ (나스닥 대형주)', 'SPY': 'SPDR S&P 500 ETF (미국 대형주)',
     'GLD': 'SPDR Gold Shares (금 실물)', 'TLT': 'iShares 20+ Year Treasury Bond (미국 장기채)',
     'DBC': 'Invesco DB Commodity Index (원자재)', 'VNQ': 'Vanguard Real Estate ETF (미국 부동산)',
-    'SH': 'ProShares Short S&P500 (🔥 S&P500 공매도 1X)', # 🌟 인버스 ETF 추가
-    'PSQ': 'ProShares Short QQQ (🔥 나스닥 공매도 1X)' # 🌟 인버스 ETF 추가
+    'SH': 'ProShares Short S&P500 (🔥 S&P500 인버스)', 
+    'PSQ': 'ProShares Short QQQ (🔥 나스닥 인버스)' 
 }
 try:
     kr_df = pd.read_csv('kospi_list.csv')
@@ -150,9 +151,9 @@ for t, pos in portfolio.items(): current_sector_units[get_sector(t)] += pos['uni
 print(f"\n🤖 총 {len(all_stocks)}개 자산 정밀 스캔 시작!\n")
 
 # ==========================================
-# 검사 및 주문 집행
+# 🌟 4. 데이터 검증 및 주문 집행 (v9.2 패치 적용)
 # ==========================================
-if kis_token: # 토큰이 있을 때만 스캔 진행
+if kis_token: 
     for ticker, name in all_stocks.items():
         try:
             stock_data = yf.download(ticker, period='1y', progress=False)
@@ -174,7 +175,7 @@ if kis_token: # 토큰이 있을 때만 스캔 진행
             chart_link = f"https://finance.naver.com/item/fchart.naver?code={ticker.replace('.KS', '')}" if is_krw else f"https://finance.yahoo.com/quote/{ticker}/chart"
             sector = get_sector(ticker)
 
-            # 📂 A. 청산 및 불타기
+            # 📂 A. 청산 및 불타기 로직
             if ticker in portfolio:
                 pos = portfolio[ticker]
                 low_10 = stock_data['Low'].iloc[-11:-1].min().item()
@@ -199,13 +200,29 @@ if kis_token: # 토큰이 있을 때만 스캔 진행
                         current_sector_units[sector] += 1
                         buy_signals.append(f"- [{name}] 🔥 {pos['units']}차 불타기 ➞ {order_res} [📊 차트]({chart_link})")
 
-            # 📂 B. 신규 진입
+            # 📂 B. 신규 진입 로직 (스마트 필터링)
             else:
-                if current_price < stock_data['Close'].rolling(window=200).mean().iloc[-1].item(): continue
+                # 1. 거래대금 필터
                 turnover_krw = (current_price * stock_data['Volume'].iloc[-1].item()) if is_krw else (current_price * stock_data['Volume'].iloc[-1].item() * exchange_rate)
                 if turnover_krw < MIN_TURNOVER_KRW: continue
-                if (N / current_price) * 100 < MIN_VOLATILITY_RATIO: continue
                 
+                # 2. 이동평균선 및 변동성 필터 분기
+                volatility_ratio = (N / current_price) * 100
+                is_above_200 = current_price >= stock_data['Close'].rolling(window=200).mean().iloc[-1].item()
+                is_above_120 = current_price >= stock_data['Close'].rolling(window=120).mean().iloc[-1].item() 
+                is_above_60 = current_price >= stock_data['Close'].rolling(window=60).mean().iloc[-1].item()   
+                
+                if sector == 'Stock':
+                    if not is_above_120: continue      # 개별주: 120일선(6개월 반기)으로 완화
+                    if volatility_ratio < 1.0: continue # 개별주: 1.0%로 완화 (우량주 포함)
+                elif sector == 'Inverse':
+                    if not is_above_60: continue       # 인버스: 60일선 적용
+                    if volatility_ratio < 0.5: continue
+                else:
+                    if not is_above_200: continue      # 금, 채권, ETF: 200일선 방어막 유지
+                    if volatility_ratio < 0.5: continue
+
+                # 3. 방아쇠 (20일 고점 돌파)
                 if current_price >= stock_data['High'].iloc[-21:-1].max().item():
                     if current_total_units + 1 > MAX_TOTAL_UNITS: skipped_signals.append(f"- [{name}] 총 Unit 초과로 보류")
                     elif current_sector_units[sector] + 1 > MAX_SECTOR_UNITS: skipped_signals.append(f"- [{name}] {sector} 한도 초과")
@@ -223,7 +240,7 @@ if kis_token: # 토큰이 있을 때만 스캔 진행
 with open(PORTFOLIO_FILE, 'w', encoding='utf-8') as f: json.dump(portfolio, f, indent=4, ensure_ascii=False)
 
 # ==========================================
-# 브리핑 전송 (디스코드 + 구글 시트)
+# 🌟 5. 브리핑 전송 (디스코드 + 구글 시트)
 # ==========================================
 buy_text = '\n'.join(buy_signals[:10]) if buy_signals else '신호 없음'
 sell_text = '\n'.join(sell_signals[:10]) if sell_signals else '신호 없음'
@@ -231,7 +248,7 @@ skip_text = '\n'.join(skipped_signals[:5]) if skipped_signals else '보류 없�
 
 if buy_signals or sell_signals or skipped_signals:
     prompt = f"""
-    아래는 퀀트 봇 v9.0의 체결 결과입니다. 짧고 건조한 전문가 톤으로 요약하세요.
+    아래는 퀀트 봇 v9.2의 체결 결과입니다. 짧고 건조한 전문가 톤으로 요약하세요.
     [매수] {buy_text}
     [청산] {sell_text}
     [보류] {skip_text}
@@ -244,9 +261,9 @@ if buy_signals or sell_signals or skipped_signals:
         except Exception: time.sleep(5)
             
     if not response_text: response_text = f"**매수**\n{buy_text}\n\n**청산**\n{sell_text}"
-    final_content = f"🤖 **터틀 펀드 v9.0 (모의투자)** 🤖\n{response_text}"
+    final_content = f"🤖 **터틀 펀드 v9.2 (모의투자)** 🤖\n{response_text}"
 else:
-    final_content = f"🤖 **터틀 펀드 v9.0 가동 중** 🤖\n계좌 리스크 {current_total_units}/{MAX_TOTAL_UNITS} Units. 현재 시장 상황 관망 중."
+    final_content = f"🤖 **터틀 펀드 v9.2 가동 중** 🤖\n계좌 리스크 {current_total_units}/{MAX_TOTAL_UNITS} Units. 현재 시장 상황 관망 중."
 
 requests.post(DISCORD_WEBHOOK_URL, json={"content": final_content})
 
