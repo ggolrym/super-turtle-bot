@@ -192,28 +192,26 @@ for ticker, name in all_stocks.items():
                     current_sector_units[sector] += 1
                     buy_signals.append(f"- [{name}] 🔥 {pos['units']}차 불타기 ({unit_size}주) ➞ {order_res} [📊 차트]({chart_link})")
 
-        # 📂 B. 신규 진입
+     # ------------------------------------------------
+        # 📂 B. 신규 진입 (실제 API 매수)
+        # ------------------------------------------------
         else:
-            if current_price < stock_data['Close'].rolling(window=200).mean().iloc[-1].item(): continue
-            turnover_krw = (current_price * stock_data['Volume'].iloc[-1].item()) if is_krw else (current_price * stock_data['Volume'].iloc[-1].item() * exchange_rate)
-            if turnover_krw < MIN_TURNOVER_KRW: continue
-            if (N / current_price) * 100 < MIN_VOLATILITY_RATIO: continue
+            # === 🚨 [테스트용 절대 무적 치트키] ===
+            if ticker == '005930.KS': # 삼성전자 종목만 강제 타겟팅
+                # 차트, 거래대금 다 무시하고 무조건 1주 매수 주문 발송
+                order_res = execute_order(ticker, 1, side="BUY", price=current_price) 
+                
+                # 장부에 강제 기록
+                portfolio[ticker] = {
+                    'name': name, 'units': 1, 
+                    'last_buy_price': current_price, 'stop_loss': current_price * 0.8
+                }
+                buy_signals.append(f"- [{name}] 🚨 강제 테스트 진입 (1주) ➞ {order_res}")
+                
+                break # 삼성전자 주문 쐈으면 나머지 1,400개 검사 안 하고 즉시 종료!
             
-            if current_price >= stock_data['High'].iloc[-6:-1].max().item():
-                if current_total_units + 1 > MAX_TOTAL_UNITS: skipped_signals.append(f"- [{name}] 총 Unit 초과로 신규 매수 보류")
-                elif current_sector_units[sector] + 1 > MAX_SECTOR_UNITS: skipped_signals.append(f"- [{name}] 섹터 초과로 신규 매수 보류")
-                else:
-                    order_res = execute_order(ticker, unit_size, side="BUY", price=current_price) # 🌟 가격 전달
-                    stop_loss_price = current_price - (2 * N)
-                    portfolio[ticker] = {'name': name, 'units': unit_size, 'last_buy_price': current_price, 'stop_loss': stop_loss_price}
-                    current_total_units += 1
-                    current_sector_units[sector] += 1
-                    buy_signals.append(f"- [{name}] ✨ 신규 1차 진입 ({unit_size}주) ➞ {order_res} [📊 차트]({chart_link})")
-
-    except Exception: pass
-    time.sleep(0.3)
-
-with open(PORTFOLIO_FILE, 'w', encoding='utf-8') as f: json.dump(portfolio, f, indent=4, ensure_ascii=False)
+            continue # 삼성전자가 아닌 다른 종목은 검사 안 하고 무조건 패스
+            # ==================================
 
 # ==========================================
 # 5. 브리핑 작성 및 전송
