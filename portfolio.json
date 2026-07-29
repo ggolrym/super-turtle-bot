@@ -208,11 +208,5 @@
         "units": 1,
         "last_buy_price": 302.6400146484375,
         "stop_loss": 287.5742675673914
-    },
-    "005930.KS": {
-        "name": "삼성전자",
-        "units": 1,
-        "last_buy_price": 230000.0,
-        "stop_loss": 184000.0
     }
 }
