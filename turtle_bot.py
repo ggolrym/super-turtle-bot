@@ -95,7 +95,7 @@ TOTAL_CAPITAL = 500000
 RISK_PERCENT = 0.02        
 RISK_AMOUNT = TOTAL_CAPITAL * RISK_PERCENT
 MIN_TURNOVER_KRW = 10000000000 
-MIN_VOLATILITY_RATIO = 1.5 
+MIN_VOLATILITY_RATIO = 0.1 
 PORTFOLIO_FILE = 'portfolio.json' 
 MAX_TOTAL_UNITS = 12       
 MAX_SECTOR_UNITS = 6       
@@ -199,7 +199,7 @@ for ticker, name in all_stocks.items():
             if turnover_krw < MIN_TURNOVER_KRW: continue
             if (N / current_price) * 100 < MIN_VOLATILITY_RATIO: continue
             
-            if current_price >= stock_data['High'].iloc[-21:-1].max().item():
+            if current_price >= stock_data['High'].iloc[-6:-1].max().item():
                 if current_total_units + 1 > MAX_TOTAL_UNITS: skipped_signals.append(f"- [{name}] 총 Unit 초과로 신규 매수 보류")
                 elif current_sector_units[sector] + 1 > MAX_SECTOR_UNITS: skipped_signals.append(f"- [{name}] 섹터 초과로 신규 매수 보류")
                 else:
