@@ -1,5 +1,5 @@
 # ==========================================
-# 🐢 AI 멀티 에셋 터틀 봇 v9.5.1 (소액 50만원 + 테스트 오버드라이브 모드)
+# 🐢 AI 멀티 에셋 터틀 봇 v9.5.2 (소액 오버드라이브 + 장부 강제 리셋 패치)
 # ==========================================
 import os
 import yfinance as yf
@@ -90,23 +90,21 @@ def execute_order(ticker, qty, side="BUY", price=0.0):
     except Exception as e: return {"success": False, "msg": f"❌ 에러({e})"}
 
 # ==========================================
-# 🌟 포트폴리오 세팅 (50만 원 소액 + 오버드라이브)
+# 🌟 포트폴리오 세팅
 # ==========================================
 TOTAL_CAPITAL = 500000      # 💰 총 자본금 50만 원
 RISK_PERCENT = 0.02        
 RISK_AMOUNT = TOTAL_CAPITAL * RISK_PERCENT
 
-# 🌟 [폭주 모드] 조건 대폭 완화
 MIN_TURNOVER_KRW = 50000000 # 거래대금 5천만 원 이상
-MAX_POSITION_KRW = 100000   # 🚨 [소액 특화] 한 종목 최대 10만 원 제한
+MAX_POSITION_KRW = 100000   # 한 종목 최대 10만 원 제한
 
 PORTFOLIO_FILE = 'portfolio.json' 
 MAX_POSITIONS = 10          # 최대 10개 종목
 MAX_SECTOR_POSITIONS = 5       
 
-if os.path.exists(PORTFOLIO_FILE):
-    with open(PORTFOLIO_FILE, 'r', encoding='utf-8') as f: portfolio = json.load(f)
-else: portfolio = {}
+# 🚨 [장부 강제 리셋 패치] 과거 파일 무시하고 무조건 빈 장부로 시작!
+portfolio = {}
 
 exchange_rate = 1350
 try:
@@ -139,14 +137,11 @@ try:
     for _, row in us_df.iterrows(): all_stocks[str(row[col_sym])] = str(row[col_name])
 except: pass
 
-# 🌟 [장부 픽스 적용] 종목 수(Positions) 단위로 정확히 계산
+# 이제 portfolio는 무조건 {} 이므로 현재 보유량은 0에서 깔끔하게 출발합니다.
 current_positions = len(portfolio)
 current_sector_positions = {'Stock': 0, 'Gold': 0, 'Commodity': 0, 'Inverse': 0}
-for t in portfolio.keys(): 
-    sec = get_sector(t)
-    if sec in current_sector_positions: current_sector_positions[sec] += 1
 
-print(f"\n🤖 총 {len(all_stocks)}개 자산 소액 오버드라이브 스캔 시작 (v9.5.1)!\n")
+print(f"\n🤖 총 {len(all_stocks)}개 자산 소액 오버드라이브 스캔 시작 (v9.5.2 강제리셋)!\n")
 
 # ==========================================
 # 🌟 데이터 검증 및 묻지마 매수 집행
@@ -194,29 +189,9 @@ if kis_token:
             chart_link = f"https://finance.naver.com/item/fchart.naver?code={ticker.replace('.KS', '')}" if is_krw else f"https://finance.yahoo.com/quote/{ticker}/chart"
             sector = get_sector(ticker)
 
-            # 📂 A. 기존 포지션 관리
+            # 📂 A. 기존 포지션 관리 (초기화되어서 여긴 실행 안 됨)
             if ticker in portfolio:
-                pos = portfolio[ticker]
-                # 🌟 [오버드라이브] 쾌속 청산 (어제보다 2% 떨어지면 무조건 던짐)
-                if current_price <= pos['stop_loss'] or current_price < yesterday_close * 0.98:
-                    order_res = execute_order(ticker, pos['units'], side="SELL", price=current_price)
-                    sell_signals.append(f"- [{name}] 쾌속 청산 ➞ {order_res['msg']}")
-                    if order_res['success']:
-                        current_positions -= 1
-                        current_sector_positions[sector] -= 1
-                        del portfolio[ticker] 
-                    continue
-                
-                # 🌟 [오버드라이브] 무지성 불타기
-                chunks = pos.get('chunks', 1)
-                if chunks < 4 and current_price >= pos['last_buy_price'] + (0.1 * N):
-                    order_res = execute_order(ticker, unit_size, side="BUY", price=current_price)
-                    buy_signals.append(f"- [{name}] 🔥 쾌속 불타기 ➞ {order_res['msg']}")
-                    if order_res['success']:
-                        pos['units'] += unit_size
-                        pos['chunks'] = chunks + 1
-                        pos['last_buy_price'] = current_price
-                        pos['stop_loss'] = current_price - (2 * N)
+                continue
                     
             # 📂 B. 신규 진입 (무조건 매수)
             else:
@@ -242,6 +217,7 @@ if kis_token:
             continue
         time.sleep(0.1)
 
+# 깨끗해진 새 장부를 깃허브에 덮어쓰기 저장!
 with open(PORTFOLIO_FILE, 'w', encoding='utf-8') as f: json.dump(portfolio, f, indent=4, ensure_ascii=False)
 
 # ==========================================
@@ -251,9 +227,9 @@ buy_text = '\n'.join(buy_signals[:15]) if buy_signals else '신호 없음'
 sell_text = '\n'.join(sell_signals[:15]) if sell_signals else '신호 없음'
 
 if buy_signals or sell_signals:
-    final_content = f"🤖 **터틀 펀드 v9.5.1 (소액 50만 원 테스트 모드)** 🤖\n\n**[🚀 폭주 매수]**\n{buy_text}\n\n**[💥 쾌속 청산]**\n{sell_text}"
+    final_content = f"🤖 **터틀 펀드 v9.5.2 (소액 장부 리셋 테스트)** 🤖\n\n**[🚀 폭풍 신규 매수]**\n{buy_text}"
 else:
-    final_content = f"🤖 **터틀 펀드 v9.5.1 가동 중** 🤖\n조건을 최하로 낮췄음에도 오늘 시장에 오르는 주식이 전멸했습니다."
+    final_content = f"🤖 **터틀 펀드 v9.5.2 가동 중** 🤖\n조건을 최하로 낮췄음에도 오늘 시장에 오르는 주식이 전멸했습니다."
 
 if len(final_content) > 1900: final_content = final_content[:1900] + "\n\n... (⚠️ 내역 요약됨)"
 requests.post(DISCORD_WEBHOOK_URL, json={"content": final_content})
