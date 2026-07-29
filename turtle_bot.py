@@ -1,5 +1,5 @@
 # ==========================================
-# 🐢 AI 멀티 에셋 터틀 봇 v9.3 (거래대금 함정 돌파 및 데이터 안정화)
+# 🐢 AI 멀티 에셋 터틀 봇 v9.4.1 (모의투자 액션 극대화/조건 대폭 완화)
 # ==========================================
 import os
 import yfinance as yf
@@ -13,7 +13,6 @@ import json
 from datetime import datetime
 import pytz
 
-# 🌟 1. 환경 변수 로드
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 KIS_APP_KEY = os.environ.get("KIS_APP_KEY")
@@ -28,7 +27,6 @@ if not all([GEMINI_API_KEY, DISCORD_WEBHOOK_URL, KIS_APP_KEY, KIS_APP_SECRET, KI
 client = genai.Client(api_key=GEMINI_API_KEY)
 KIS_URL = "https://openapivts.koreainvestment.com:29443" 
 
-# 🌟 2. 한국투자증권 통신 모듈 (Timeout 방어막 탑재)
 def get_kis_token():
     url = f"{KIS_URL}/oauth2/tokenP"
     headers = {"content-type": "application/json"}
@@ -47,7 +45,7 @@ kis_token = get_kis_token()
 print("✅ KIS 토큰 발급 완료!" if kis_token else "❌ 토큰 발급 실패. 임무를 보류합니다.")
 
 def execute_order(ticker, qty, side="BUY", price=0.0):
-    if not kis_token: return "❌ 토큰 없음"
+    if not kis_token: return {"success": False, "msg": "토큰 없음"}
     
     is_krw = ticker.endswith('.KS')
     clean_ticker = ticker.replace('.KS', '')
@@ -80,29 +78,34 @@ def execute_order(ticker, qty, side="BUY", price=0.0):
         except:
             excg_cd = 'NYS'
             
+        if side == "BUY": target_price = price * 1.01 
+        else: target_price = price * 0.99
+            
         body = {
             "CANO": cano, "ACNT_PRDT_CD": prdt_cd, "OVRS_EXCG_CD": excg_cd, 
             "PDNO": clean_ticker, "ORD_QTY": str(int(qty)), 
-            "OVRS_ORD_UNPR": str(round(price, 2)), "ORD_SVR_DVSN_CD": "0", "ORD_DVSN": "00"
+            "OVRS_ORD_UNPR": str(round(target_price, 2)), "ORD_SVR_DVSN_CD": "0", "ORD_DVSN": "00"
         }
     
     try:
         res = requests.post(url, headers=headers, data=json.dumps(body), timeout=10)
         data = res.json()
-        if data.get("rt_cd") == "0": return "✅ 체결"
-        else: return f"❌ 실패({data.get('msg1')})"
-    except Exception: return f"❌ 네트워크 에러"
+        if data.get("rt_cd") == "0": return {"success": True, "msg": "✅ 체결"}
+        else: return {"success": False, "msg": f"❌ 거절({data.get('msg1')})"}
+    except Exception as e: return {"success": False, "msg": f"❌ 에러({e})"}
 
 # ==========================================
-# 🌟 3. 자본, 리스크 및 포트폴리오 세팅
+# 🌟 3. 자본, 리스크 및 포트폴리오 세팅 (조건 완화)
 # ==========================================
 TOTAL_CAPITAL = 5000000     
 RISK_PERCENT = 0.02        
 RISK_AMOUNT = TOTAL_CAPITAL * RISK_PERCENT
-MIN_TURNOVER_KRW = 10000000000 
+# 🌟 [완화] 거래대금 필터 100억 ➞ 10억으로 대폭 하향
+MIN_TURNOVER_KRW = 1000000000 
 PORTFOLIO_FILE = 'portfolio.json' 
-MAX_TOTAL_UNITS = 12       
-MAX_SECTOR_UNITS = 6       
+# 🌟 [완화] 포트폴리오 유닛 넉넉하게 확장
+MAX_TOTAL_UNITS = 20       
+MAX_SECTOR_UNITS = 10       
 
 if os.path.exists(PORTFOLIO_FILE):
     with open(PORTFOLIO_FILE, 'r', encoding='utf-8') as f: portfolio = json.load(f)
@@ -125,9 +128,9 @@ def get_sector(ticker):
     else: return 'Stock'
 
 all_stocks = {
-    'QQQ': 'Invesco QQQ (나스닥 대형주)', 'SPY': 'SPDR S&P 500 ETF (미국 대형주)',
-    'GLD': 'SPDR Gold Shares (금 실물)', 'TLT': 'iShares 20+ Year Treasury Bond (미국 장기채)',
-    'DBC': 'Invesco DB Commodity Index (원자재)', 'VNQ': 'Vanguard Real Estate ETF (미국 부동산)',
+    'QQQ': 'Invesco QQQ', 'SPY': 'SPDR S&P 500',
+    'GLD': 'SPDR Gold', 'TLT': 'iShares 20+ Bond',
+    'DBC': 'Invesco Commodity', 'VNQ': 'Vanguard Real Estate',
     'SH': 'ProShares Short S&P500 (🔥 S&P500 인버스)', 
     'PSQ': 'ProShares Short QQQ (🔥 나스닥 인버스)' 
 }
@@ -148,17 +151,17 @@ current_total_units = sum(pos['units'] for pos in portfolio.values())
 current_sector_units = {'Stock': 0, 'Gold': 0, 'Bond': 0, 'Commodity': 0, 'Real_Estate': 0, 'Inverse': 0}
 for t, pos in portfolio.items(): current_sector_units[get_sector(t)] += pos['units']
 
-print(f"\n🤖 총 {len(all_stocks)}개 자산 정밀 스캔 시작!\n")
+print(f"\n🤖 총 {len(all_stocks)}개 자산 쾌속 스캔 시작 (v9.4.1)!\n")
 
 # ==========================================
-# 🌟 4. 데이터 검증 및 주문 집행
+# 🌟 4. 데이터 검증 및 주문 집행 (액션형 기준 적용)
 # ==========================================
 if kis_token: 
     for ticker, name in all_stocks.items():
         try:
-            # 🌟 [v9.3 패치] 2년치(2y) 데이터 조회로 200일선 계산 안정성 극대화
             stock_data = yf.download(ticker, period='2y', progress=False)
-            if len(stock_data) < 200: continue
+            # 🌟 [완화] 데이터 최소 필요 일수를 200일 ➞ 60일로 단축
+            if len(stock_data) < 60: continue
                 
             current_price = stock_data['Close'].iloc[-1].item()
             
@@ -179,62 +182,69 @@ if kis_token:
             # 📂 A. 청산 및 불타기 로직
             if ticker in portfolio:
                 pos = portfolio[ticker]
-                low_10 = stock_data['Low'].iloc[-11:-1].min().item()
+                # 🌟 [완화] 10일 저점 ➞ 5일 저점 이탈 시 빠른 손절/익절 (잦은 청산)
+                low_5 = stock_data['Low'].iloc[-6:-1].min().item()
                 
-                if current_price <= pos['stop_loss'] or current_price <= low_10:
+                if current_price <= pos['stop_loss'] or current_price <= low_5:
                     order_res = execute_order(ticker, pos['units'], side="SELL", price=current_price)
-                    sell_signals.append(f"- [{name}] 전량 청산 ({pos['units']}주) ➞ {order_res} [📊 차트]({chart_link})")
-                    current_total_units -= pos['units']
-                    current_sector_units[sector] -= pos['units']
-                    del portfolio[ticker] 
+                    sell_signals.append(f"- [{name}] 청산 ({pos['units']}주) ➞ {order_res['msg']} [📊 차트]({chart_link})")
+                    
+                    if order_res['success']:
+                        current_total_units -= pos['units']
+                        current_sector_units[sector] -= pos['units']
+                        del portfolio[ticker] 
                     continue
                     
-                if pos['units'] < 4 and current_price >= pos['last_buy_price'] + (0.5 * N):
-                    if current_total_units + 1 > MAX_TOTAL_UNITS: skipped_signals.append(f"- [{name}] 총 Unit 초과로 보류")
+                # 🌟 [완화] 불타기 기준을 절반(0.25N)으로 낮춰서 더 공격적으로 비중 확대
+                if pos['units'] < 4 and current_price >= pos['last_buy_price'] + (0.25 * N):
+                    if current_total_units + 1 > MAX_TOTAL_UNITS: skipped_signals.append(f"- [{name}] 총 Unit 초과 보류")
                     elif current_sector_units[sector] + 1 > MAX_SECTOR_UNITS: skipped_signals.append(f"- [{name}] {sector} 한도 초과")
                     else:
                         order_res = execute_order(ticker, unit_size, side="BUY", price=current_price)
-                        pos['units'] += unit_size
-                        pos['last_buy_price'] = current_price
-                        pos['stop_loss'] = current_price - (2 * N)
-                        current_total_units += 1
-                        current_sector_units[sector] += 1
-                        buy_signals.append(f"- [{name}] 🔥 {pos['units']}차 불타기 ➞ {order_res} [📊 차트]({chart_link})")
+                        buy_signals.append(f"- [{name}] 🔥 {pos['units']+1}차 불타기 ({unit_size}주) ➞ {order_res['msg']}")
+                        
+                        if order_res['success']:
+                            pos['units'] += unit_size
+                            pos['last_buy_price'] = current_price
+                            pos['stop_loss'] = current_price - (2 * N)
+                            current_total_units += 1
+                            current_sector_units[sector] += 1
 
             # 📂 B. 신규 진입 로직
             else:
-                # 🌟 [v9.3 패치] 장 초반 거래대금 0원 함정 돌파: '최근 20일 평균 거래량'으로 심사
                 avg_volume = stock_data['Volume'].iloc[-21:-1].mean().item()
                 turnover_krw = (current_price * avg_volume) * (1 if is_krw else exchange_rate)
                 if turnover_krw < MIN_TURNOVER_KRW: continue
                 
-                # 2. 이동평균선 및 변동성 필터 분기
                 volatility_ratio = (N / current_price) * 100
-                is_above_200 = current_price >= stock_data['Close'].rolling(window=200).mean().iloc[-1].item()
-                is_above_120 = current_price >= stock_data['Close'].rolling(window=120).mean().iloc[-1].item() 
-                is_above_60 = current_price >= stock_data['Close'].rolling(window=60).mean().iloc[-1].item()   
+                
+                # 🌟 [완화] 추세 기준선을 1/3 토막으로 깎아서 진입 장벽 낮춤
+                is_above_60 = current_price >= stock_data['Close'].rolling(window=60).mean().iloc[-1].item() 
+                is_above_20 = current_price >= stock_data['Close'].rolling(window=20).mean().iloc[-1].item()   
                 
                 if sector == 'Stock':
-                    if not is_above_120: continue      # 개별주: 120일선(6개월 반기)으로 완화
-                    if volatility_ratio < 1.0: continue # 개별주: 1.0%로 완화 (우량주 포함)
+                    if not is_above_60: continue      # 주식: 120일 ➞ 60일선(석 달) 통과 시
+                    if volatility_ratio < 0.5: continue # 주식: 변동성 1.0% ➞ 0.5%
                 elif sector == 'Inverse':
-                    if not is_above_60: continue       # 인버스: 60일선 적용
-                    if volatility_ratio < 0.5: continue
+                    if not is_above_20: continue       # 인버스: 60일 ➞ 20일선(한 달) 통과 시
+                    if volatility_ratio < 0.2: continue # 인버스: 변동성 0.5% ➞ 0.2%
                 else:
-                    if not is_above_200: continue      # 금, 채권, ETF: 200일선 방어막 유지
-                    if volatility_ratio < 0.5: continue
+                    if not is_above_60: continue      # ETF: 200일 ➞ 60일선 통과 시
+                    if volatility_ratio < 0.2: continue # ETF: 변동성 0.5% ➞ 0.2%
 
-                # 3. 방아쇠 (20일 고점 돌파)
-                if current_price >= stock_data['High'].iloc[-21:-1].max().item():
+                # 🌟 [완화] 방아쇠: 20일 고점 ➞ 10일 고점 돌파 시 즉각 발포!
+                if current_price >= stock_data['High'].iloc[-11:-1].max().item():
                     if current_total_units + 1 > MAX_TOTAL_UNITS: skipped_signals.append(f"- [{name}] 총 Unit 초과로 보류")
                     elif current_sector_units[sector] + 1 > MAX_SECTOR_UNITS: skipped_signals.append(f"- [{name}] {sector} 한도 초과")
                     else:
                         order_res = execute_order(ticker, unit_size, side="BUY", price=current_price)
-                        stop_loss_price = current_price - (2 * N)
-                        portfolio[ticker] = {'name': name, 'units': unit_size, 'last_buy_price': current_price, 'stop_loss': stop_loss_price}
-                        current_total_units += 1
-                        current_sector_units[sector] += 1
-                        buy_signals.append(f"- [{name}] ✨ 신규 1차 진입 ({unit_size}주) ➞ {order_res} [📊 차트]({chart_link})")
+                        buy_signals.append(f"- [{name}] ✨ 신규 진입 ({unit_size}주) ➞ {order_res['msg']} [📊 차트]({chart_link})")
+                        
+                        if order_res['success']:
+                            stop_loss_price = current_price - (2 * N)
+                            portfolio[ticker] = {'name': name, 'units': unit_size, 'last_buy_price': current_price, 'stop_loss': stop_loss_price}
+                            current_total_units += 1
+                            current_sector_units[sector] += 1
 
         except Exception: pass
         time.sleep(0.3)
@@ -244,13 +254,14 @@ with open(PORTFOLIO_FILE, 'w', encoding='utf-8') as f: json.dump(portfolio, f, i
 # ==========================================
 # 🌟 5. 브리핑 전송 (디스코드 + 구글 시트)
 # ==========================================
-buy_text = '\n'.join(buy_signals[:10]) if buy_signals else '신호 없음'
-sell_text = '\n'.join(sell_signals[:10]) if sell_signals else '신호 없음'
+buy_text = '\n'.join(buy_signals[:15]) if buy_signals else '신호 없음'
+sell_text = '\n'.join(sell_signals[:15]) if sell_signals else '신호 없음'
 skip_text = '\n'.join(skipped_signals[:5]) if skipped_signals else '보류 없음'
 
 if buy_signals or sell_signals or skipped_signals:
     prompt = f"""
-    아래는 퀀트 봇 v9.3의 체결 결과입니다. 짧고 건조한 전문가 톤으로 요약하세요.
+    아래는 퀀트 봇 v9.4.1(테스트 액션 모드)의 체결 결과입니다. 
+    주의: "거절/에러"가 포함된 종목은 계좌에 매수되지 않았음을 명시하세요.
     [매수] {buy_text}
     [청산] {sell_text}
     [보류] {skip_text}
@@ -263,9 +274,9 @@ if buy_signals or sell_signals or skipped_signals:
         except Exception: time.sleep(5)
             
     if not response_text: response_text = f"**매수**\n{buy_text}\n\n**청산**\n{sell_text}"
-    final_content = f"🤖 **터틀 펀드 v9.3 (모의투자)** 🤖\n{response_text}"
+    final_content = f"🤖 **터틀 펀드 v9.4.1 (테스트 액션 모드)** 🤖\n{response_text}"
 else:
-    final_content = f"🤖 **터틀 펀드 v9.3 가동 중** 🤖\n계좌 리스크 {current_total_units}/{MAX_TOTAL_UNITS} Units. 현재 시장 상황 관망 중."
+    final_content = f"🤖 **터틀 펀드 v9.4.1 가동 중** 🤖\n계좌 리스크 {current_total_units}/{MAX_TOTAL_UNITS} Units. (허들을 대폭 낮췄음에도 오늘은 장이 고요합니다.)"
 
 requests.post(DISCORD_WEBHOOK_URL, json={"content": final_content})
 
@@ -273,7 +284,7 @@ if SHEET_WEBHOOK_URL:
     kr_time = datetime.now(pytz.timezone('Asia/Seoul')).strftime('%Y-%m-%d %H:%M:%S')
     buy_count = len(buy_signals)
     sell_count = len(sell_signals)
-    summary_msg = f"매수 {buy_count}건, 청산 {sell_count}건" if (buy_count > 0 or sell_count > 0) else "특이사항 없음 (관망)"
+    summary_msg = f"매수/청산 활발 (디스코드 확인)" if (buy_count > 0 or sell_count > 0) else "특이사항 없음 (관망)"
     
     sheet_data = {
         "date": kr_time,
