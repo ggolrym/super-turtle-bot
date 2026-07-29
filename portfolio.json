@@ -3,15 +3,15 @@
         "name": "ProShares Short S&P500 (🔥 S&P500 인버스)",
         "units": 2,
         "chunks": 1,
-        "last_buy_price": 33.724998474121094,
-        "stop_loss": 33.03301773071289
+        "last_buy_price": 33.82500076293945,
+        "stop_loss": 33.11500015258789
     },
     "PSQ": {
         "name": "ProShares Short QQQ (🔥 나스닥 인버스)",
         "units": 2,
         "chunks": 1,
-        "last_buy_price": 27.700000762939453,
-        "stop_loss": 26.675901031494142
+        "last_buy_price": 27.825000762939453,
+        "stop_loss": 26.77900085449219
     },
     "AES": {
         "name": "AES Corporation",
@@ -24,28 +24,28 @@
         "name": "Alexandria Real Estate Equities",
         "units": 1,
         "chunks": 1,
-        "last_buy_price": 54.97999954223633,
-        "stop_loss": 51.84499893188477
+        "last_buy_price": 54.68000030517578,
+        "stop_loss": 51.54499969482422
     },
     "APA": {
         "name": "APA Corporation",
         "units": 1,
         "chunks": 1,
-        "last_buy_price": 36.27000045776367,
-        "stop_loss": 33.92907606015338
+        "last_buy_price": 36.150001525878906,
+        "stop_loss": 33.80907712826861
     },
     "BKR": {
         "name": "Baker Hughes",
         "units": 1,
         "chunks": 1,
-        "last_buy_price": 60.13999938964844,
-        "stop_loss": 55.76799774169922
+        "last_buy_price": 59.77000045776367,
+        "stop_loss": 55.39799880981445
     },
     "BAX": {
         "name": "Baxter International",
         "units": 2,
         "chunks": 1,
-        "last_buy_price": 24.735000610351562,
-        "stop_loss": 23.002001190185545
+        "last_buy_price": 24.44499969482422,
+        "stop_loss": 22.7120002746582
     }
 }
