@@ -251,5 +251,31 @@ if buy_signals or sell_signals or skipped_signals:
     final_content = f"🤖 **무인 퀀트 자동매매 v8.1 결산 (모의투자)** 🤖\n{response_text}"
     if len(final_content) > 1900: final_content = final_content[:1900] + "\n\n... (⚠️ 내용 요약됨)"
     requests.post(DISCORD_WEBHOOK_URL, json={"content": final_content})
+        # 🌟 [신규 추가] 구글 스프레드시트 대시보드 업데이트 로직
+    SHEET_WEBHOOK_URL = os.environ.get("SHEET_WEBHOOK_URL")
+
+    if SHEET_WEBHOOK_URL:
+        from datetime import datetime
+        import pytz
+    
+        kr_time = datetime.now(pytz.timezone('Asia/Seoul')).strftime('%Y-%m-%d %H:%M:%S')
+        buy_count = len(buy_signals)
+        sell_count = len(sell_signals)
+        summary_msg = f"매수 {buy_count}건 / 청산 {sell_count}건" if (buy_count > 0 or sell_count > 0) else "특이사항 없음 (홀딩)"
+    
+        sheet_data = {
+            "date": kr_time,
+            "total_units": f"{current_total_units} / {MAX_TOTAL_UNITS}",
+            "buys": buy_count,
+            "sells": sell_count,
+            "message": summary_msg
+        }
+    
+        try:
+            requests.post(SHEET_WEBHOOK_URL, json=sheet_data)
+            print("📊 구글 스프레드시트 대시보드 업데이트 완료!")
+        except Exception as e:
+            print(f"⚠️ 구글 시트 업데이트 실패: {e}")
+    
 else:
     requests.post(DISCORD_WEBHOOK_URL, json={"content": f"🤖 **무인 퀀트 자동매매 v8.1 가동 중 (모의투자)** 🤖\n현재 계좌 리스크 {current_total_units}/{MAX_TOTAL_UNITS} Units. 오늘 발송된 주문은 없습니다."})
