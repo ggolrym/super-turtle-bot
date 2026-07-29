@@ -1,5 +1,5 @@
 # ==========================================
-# 🐢 AI 멀티 에셋 터틀 봇 v9.2 (인버스 롱숏 + 우량주 120일선 최적화)
+# 🐢 AI 멀티 에셋 터틀 봇 v9.3 (거래대금 함정 돌파 및 데이터 안정화)
 # ==========================================
 import os
 import yfinance as yf
@@ -13,7 +13,7 @@ import json
 from datetime import datetime
 import pytz
 
-# 🌟 1. 환경 변수 로드 (API 키 및 시크릿)
+# 🌟 1. 환경 변수 로드
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 KIS_APP_KEY = os.environ.get("KIS_APP_KEY")
@@ -151,12 +151,13 @@ for t, pos in portfolio.items(): current_sector_units[get_sector(t)] += pos['uni
 print(f"\n🤖 총 {len(all_stocks)}개 자산 정밀 스캔 시작!\n")
 
 # ==========================================
-# 🌟 4. 데이터 검증 및 주문 집행 (v9.2 패치 적용)
+# 🌟 4. 데이터 검증 및 주문 집행
 # ==========================================
 if kis_token: 
     for ticker, name in all_stocks.items():
         try:
-            stock_data = yf.download(ticker, period='1y', progress=False)
+            # 🌟 [v9.3 패치] 2년치(2y) 데이터 조회로 200일선 계산 안정성 극대화
+            stock_data = yf.download(ticker, period='2y', progress=False)
             if len(stock_data) < 200: continue
                 
             current_price = stock_data['Close'].iloc[-1].item()
@@ -200,10 +201,11 @@ if kis_token:
                         current_sector_units[sector] += 1
                         buy_signals.append(f"- [{name}] 🔥 {pos['units']}차 불타기 ➞ {order_res} [📊 차트]({chart_link})")
 
-            # 📂 B. 신규 진입 로직 (스마트 필터링)
+            # 📂 B. 신규 진입 로직
             else:
-                # 1. 거래대금 필터
-                turnover_krw = (current_price * stock_data['Volume'].iloc[-1].item()) if is_krw else (current_price * stock_data['Volume'].iloc[-1].item() * exchange_rate)
+                # 🌟 [v9.3 패치] 장 초반 거래대금 0원 함정 돌파: '최근 20일 평균 거래량'으로 심사
+                avg_volume = stock_data['Volume'].iloc[-21:-1].mean().item()
+                turnover_krw = (current_price * avg_volume) * (1 if is_krw else exchange_rate)
                 if turnover_krw < MIN_TURNOVER_KRW: continue
                 
                 # 2. 이동평균선 및 변동성 필터 분기
@@ -248,7 +250,7 @@ skip_text = '\n'.join(skipped_signals[:5]) if skipped_signals else '보류 없�
 
 if buy_signals or sell_signals or skipped_signals:
     prompt = f"""
-    아래는 퀀트 봇 v9.2의 체결 결과입니다. 짧고 건조한 전문가 톤으로 요약하세요.
+    아래는 퀀트 봇 v9.3의 체결 결과입니다. 짧고 건조한 전문가 톤으로 요약하세요.
     [매수] {buy_text}
     [청산] {sell_text}
     [보류] {skip_text}
@@ -261,9 +263,9 @@ if buy_signals or sell_signals or skipped_signals:
         except Exception: time.sleep(5)
             
     if not response_text: response_text = f"**매수**\n{buy_text}\n\n**청산**\n{sell_text}"
-    final_content = f"🤖 **터틀 펀드 v9.2 (모의투자)** 🤖\n{response_text}"
+    final_content = f"🤖 **터틀 펀드 v9.3 (모의투자)** 🤖\n{response_text}"
 else:
-    final_content = f"🤖 **터틀 펀드 v9.2 가동 중** 🤖\n계좌 리스크 {current_total_units}/{MAX_TOTAL_UNITS} Units. 현재 시장 상황 관망 중."
+    final_content = f"🤖 **터틀 펀드 v9.3 가동 중** 🤖\n계좌 리스크 {current_total_units}/{MAX_TOTAL_UNITS} Units. 현재 시장 상황 관망 중."
 
 requests.post(DISCORD_WEBHOOK_URL, json={"content": final_content})
 
