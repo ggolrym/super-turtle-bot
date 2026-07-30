@@ -4,7 +4,7 @@ on:
   workflow_dispatch: # 수동 실행 (테스트 및 60일 비활성화 셧다운 리셋용)
   schedule:
     # 🇰🇷 1. 한국 주식 (KOSPI/KOSDAQ) 종가 베팅
-    # 매주 월~금요일 오후 3시 17분 실행 (정각 딜레이 방지)
+    # 매주 월~금요일 오후 3시 6분 실행 (정각 딜레이 방지)
     - cron: '6 15 * * 1-5'
       timezone: 'Asia/Seoul'
 
