@@ -1,5 +1,5 @@
 # ==========================================
-# 🐢 AI 멀티 에셋 터틀 봇 v9.6 (소액 50만 원 실전 최종본 + 무결점 픽스 통합)
+# 🐢 AI 멀티 에셋 터틀 봇 v9.6.1 (실전 + 강철 장부 패치)
 # ==========================================
 import os
 import yfinance as yf
@@ -76,7 +76,6 @@ def execute_order(ticker, qty, side="BUY", price=0.0):
             else: excg_cd = 'NYS'
         except: excg_cd = 'NYS'
             
-        # 🌟 해외 주식 1% 버퍼 (슬리피지 극복 지정가)
         target_price = price * 1.01 if side == "BUY" else price * 0.99
             
         body = {
@@ -93,23 +92,28 @@ def execute_order(ticker, qty, side="BUY", price=0.0):
     except Exception as e: return {"success": False, "msg": f"❌ 에러({e})"}
 
 # ==========================================
-# 🌟 3. 자본 및 포트폴리오 세팅 (50만 원 소액 실전)
+# 🌟 3. 자본 및 포트폴리오 세팅
 # ==========================================
 TOTAL_CAPITAL = 500000      # 💰 총 자본금 50만 원
 RISK_PERCENT = 0.02        
 RISK_AMOUNT = TOTAL_CAPITAL * RISK_PERCENT
 
-MIN_TURNOVER_KRW = 5000000000 # 거래대금 50억 이상 (우량주 필터 복구)
-MAX_POSITION_KRW = 100000     # 🚨 [소액 특화] 한 종목당 최대 10만 원 제한
+MIN_TURNOVER_KRW = 5000000000 
+MAX_POSITION_KRW = 100000     
 
 PORTFOLIO_FILE = 'portfolio.json' 
-MAX_POSITIONS = 10          # 최대 10개 종목 (포지션 기준)
+MAX_POSITIONS = 10          
 MAX_SECTOR_POSITIONS = 5       
 
-# 🌟 정상적인 포트폴리오 로드 (강제 리셋 제거)
+# 🌟 [v9.6.1 패치] 강철 장부 로직: 파일이 완전히 비어있거나 깨져도 절대 뻗지 않음!
+portfolio = {}
 if os.path.exists(PORTFOLIO_FILE):
-    with open(PORTFOLIO_FILE, 'r', encoding='utf-8') as f: portfolio = json.load(f)
-else: portfolio = {}
+    try:
+        with open(PORTFOLIO_FILE, 'r', encoding='utf-8') as f: 
+            portfolio = json.load(f)
+    except ValueError:
+        print("⚠️ portfolio.json 파일이 비어있거나 깨졌습니다. 빈 장부로 초기화합니다.")
+        portfolio = {}
 
 exchange_rate = 1350
 try:
@@ -124,7 +128,6 @@ def get_sector(ticker):
     elif ticker in ['SH', 'PSQ']: return 'Inverse' 
     return 'Stock'
 
-# 🌟 소액 특화 미니 ETF 유지
 all_stocks = {
     'SPLG': 'SPDR Portfolio S&P 500 (미니 S&P500)', 
     'GLDM': 'SPDR Gold MiniShares (미니 금 실물)', 
@@ -143,14 +146,13 @@ try:
     for _, row in us_df.iterrows(): all_stocks[str(row[col_sym])] = str(row[col_name])
 except: pass
 
-# 🌟 유닛(수량)이 아닌 포지션(종목 수) 기준으로 정확한 카운팅
 current_positions = len(portfolio)
 current_sector_positions = {'Stock': 0, 'Gold': 0, 'Commodity': 0, 'Inverse': 0}
 for t in portfolio.keys(): 
     sec = get_sector(t)
     if sec in current_sector_positions: current_sector_positions[sec] += 1
 
-print(f"\n🤖 총 {len(all_stocks)}개 자산 실전 스캔 시작 (v9.6 최종본)!\n")
+print(f"\n🤖 총 {len(all_stocks)}개 자산 실전 스캔 시작 (v9.6.1)!\n")
 
 # ==========================================
 # 🌟 4. 데이터 검증 및 엄격한 실전 매매 집행
@@ -158,22 +160,17 @@ print(f"\n🤖 총 {len(all_stocks)}개 자산 실전 스캔 시작 (v9.6 최종
 if kis_token: 
     for ticker, name in all_stocks.items():
         try:
-            # 🌟 실전용 2년 치 데이터 조회 복구
             stock_data = yf.download(ticker, period='2y', progress=False)
-            
-            # yfinance 버그 완벽 패치 (MultiIndex 평탄화 및 결측치 제거)
             if isinstance(stock_data.columns, pd.MultiIndex):
                 stock_data.columns = stock_data.columns.get_level_values(0)
             stock_data = stock_data.dropna()
             
-            # 데이터 200일 미만 신규 상장주 컷오프 복구
             if len(stock_data) < 200: continue
                 
             current_price = float(stock_data['Close'].iloc[-1])
             is_krw = ticker.endswith('.KS')
             current_price_krw = current_price if is_krw else current_price * exchange_rate
             
-            # 🚨 [소액 보호] 1주 가격이 10만 원을 넘어가면 분산 투자를 위해 스킵
             if current_price_krw > MAX_POSITION_KRW: continue
             
             high_low = stock_data['High'] - stock_data['Low']
@@ -182,14 +179,12 @@ if kis_token:
             tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
             N = float(tr.rolling(window=20).mean().iloc[-1])
             
-            # 0으로 나누기 버그 원천 차단
             if pd.isna(N) or N <= 0: continue
             
             N_krw = N if is_krw else N * exchange_rate
             unit_size = math.floor(RISK_AMOUNT / N_krw)
             unit_size = 1 if unit_size == 0 else unit_size
 
-            # 🚨 [오버사이징 방지] 구매 금액이 10만 원을 넘으면 강제로 수량 깎기
             if unit_size * current_price_krw > MAX_POSITION_KRW:
                 unit_size = math.floor(MAX_POSITION_KRW / current_price_krw)
                 if unit_size == 0: continue 
@@ -202,7 +197,6 @@ if kis_token:
                 pos = portfolio[ticker]
                 low_10 = float(stock_data['Low'].iloc[-11:-1].min())
                 
-                # 익절/손절선 이탈 시 10일 저점 기준 철저한 청산
                 if current_price <= pos['stop_loss'] or current_price <= low_10:
                     order_res = execute_order(ticker, pos['units'], side="SELL", price=current_price)
                     sell_signals.append(f"- [{name}] 전량 청산 ({pos['units']}주) ➞ {order_res['msg']} [📊 차트]({chart_link})")
@@ -213,7 +207,6 @@ if kis_token:
                         del portfolio[ticker] 
                     continue
                     
-                # 신중한 불타기 (0.5N 상승 시, 청크 단위 관리)
                 chunks = pos.get('chunks', 1)
                 if chunks < 4 and current_price >= pos['last_buy_price'] + (0.5 * N):
                     order_res = execute_order(ticker, unit_size, side="BUY", price=current_price)
@@ -225,7 +218,7 @@ if kis_token:
                         pos['last_buy_price'] = current_price
                         pos['stop_loss'] = current_price - (2 * N)
 
-            # 📂 B. 신규 진입 로직 (실전 필터 복구)
+            # 📂 B. 신규 진입 로직
             else:
                 avg_volume = float(stock_data['Volume'].iloc[-21:-1].mean())
                 turnover_krw = (current_price * avg_volume) * (1 if is_krw else exchange_rate)
@@ -236,7 +229,6 @@ if kis_token:
                 is_above_120 = current_price >= float(stock_data['Close'].rolling(window=120).mean().iloc[-1]) 
                 is_above_60 = current_price >= float(stock_data['Close'].rolling(window=60).mean().iloc[-1])   
                 
-                # 🌟 3중 추세/변동성 필터 복구
                 if sector == 'Stock':
                     if not is_above_120: continue      
                     if volatility_ratio < 1.0: continue 
@@ -247,7 +239,6 @@ if kis_token:
                     if not is_above_200: continue      
                     if volatility_ratio < 0.5: continue
 
-                # 🌟 실전 방아쇠: 까다로운 최근 20일(한 달) 고점 돌파!
                 recent_20_high = float(stock_data['High'].iloc[-21:-1].max())
                 
                 if current_price >= recent_20_high:
@@ -278,7 +269,7 @@ skip_text = '\n'.join(skipped_signals[:5]) if skipped_signals else '보류 없�
 
 if buy_signals or sell_signals or skipped_signals:
     prompt = f"""
-    아래는 퀀트 봇 v9.6(소액 실전 최종 버전)의 체결 결과입니다. 
+    아래는 퀀트 봇 v9.6.1(소액 실전 버전)의 체결 결과입니다. 
     주의: "거절/에러"가 포함된 종목은 계좌에 매수되지 않았음을 명시하세요.
     [매수] {buy_text}
     [청산] {sell_text}
@@ -292,9 +283,9 @@ if buy_signals or sell_signals or skipped_signals:
         except Exception: time.sleep(5)
             
     if not response_text: response_text = f"**매수**\n{buy_text}\n\n**청산**\n{sell_text}"
-    final_content = f"🤖 **터틀 펀드 v9.6 (50만 원 실전 가동)** 🤖\n{response_text}"
+    final_content = f"🤖 **터틀 펀드 v9.6.1 (50만 원 실전)** 🤖\n{response_text}"
 else:
-    final_content = f"🤖 **터틀 펀드 v9.6 가동 중** 🤖\n보유 종목 {current_positions}/{MAX_POSITIONS} 개. 현재 시장 상황 관망 중."
+    final_content = f"🤖 **터틀 펀드 v9.6.1 가동 중** 🤖\n보유 종목 {current_positions}/{MAX_POSITIONS} 개. 현재 시장 상황 관망 중."
 
 requests.post(DISCORD_WEBHOOK_URL, json={"content": final_content})
 
