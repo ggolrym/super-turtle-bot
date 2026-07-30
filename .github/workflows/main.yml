@@ -1,17 +1,21 @@
 name: Turtle Bot Auto Trading
 
 on:
-  workflow_dispatch: # 수동 실행 버튼
+  workflow_dispatch: # 수동 실행 (테스트 및 60일 비활성화 셧다운 리셋용)
   schedule:
-    # 🌟 1. 한국 주식 종가 베팅 (KST 오후 3시 15분 = UTC 오전 6시 15분)
-    - cron: '0 6 * * 1-5'
-    
-    # 🌟 2. 미국 주식 종가 베팅 (KST 오전 4시 40분 = UTC 오후 7시 40분, 서머타임 기준)
-    - cron: '40 19 * * 1-5'
+    # 🇰🇷 1. 한국 주식 (KOSPI/KOSDAQ) 종가 베팅
+    # 매주 월~금요일 오후 3시 17분 실행 (정각 딜레이 방지)
+    - cron: '6 15 * * 1-5'
+      timezone: 'Asia/Seoul'
 
-# 🚨 가장 중요한 설정: 봇이 장부를 깃허브에 다시 저장할 수 있도록 쓰기(write) 권한 부여
+    # 🇺🇸 2. 미국 주식 (NYSE/NASDAQ) 종가 베팅
+    # 매주 월~금요일 오후 3시 42분 실행 (정각 딜레이 방지)
+    # 뉴욕 시간을 쓰면 서머타임(DST) 적용/해제를 GitHub이 알아서 자동 계산합니다!
+    - cron: '32 15 * * 1-5'
+      timezone: 'America/New_York'
+
 permissions:
-  contents: write
+  contents: write # 봇이 장부(portfolio.json)를 깃허브에 다시 저장하기 위한 필수 권한
 
 jobs:
   build:
@@ -19,13 +23,13 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4 # 최신 v4 사용 (경고 제거)
+      uses: actions/checkout@v4 # 최신 v4 사용 (에러/경고 방지)
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
         fetch-depth: 1
 
     - name: Set up Python
-      uses: actions/setup-python@v5 # 최신 v5 사용 (경고 제거)
+      uses: actions/setup-python@v5 # 최신 v5 사용
       with:
         python-version: '3.10'
 
@@ -49,9 +53,15 @@ jobs:
         git config --global user.name "github-actions[bot]"
         git config --global user.email "github-actions[bot]@users.noreply.github.com"
         git add portfolio.json
-        # 장부 내용에 변경 사항이 있을 때만 커밋
+        # 장부 내용에 변경 사항이 있을 때만 커밋 실행
         git diff --quiet && git diff --staged --quiet || git commit -m "Update portfolio [skip ci]"
-        # 충돌 방지를 위해 서버 최신본을 먼저 가져옴
+        # 충돌을 막기 위해 깃허브 서버의 최신본을 먼저 가져옴
         git pull --rebase origin main
-        # 깃허브에 최종 장부 덮어쓰기
+        # 최종 장부를 깃허브에 밀어넣기
         git push
+
+    # 🌟 60일 비활동으로 인한 스케줄러 중지 방어막 (Keepalive)
+    # 만약 수개월간 하락장이라 봇이 매매를 전혀 안 하더라도, 
+    # 이 액션이 주기적으로 더미(dummy) 활동을 만들어 깃허브가 스케줄러를 강제 종료하는 것을 막아줍니다.
+    - name: Keepalive Workflow
+      uses: gautamkrishnar/keepalive-workflow@v2
