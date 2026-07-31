@@ -37,3 +37,5 @@ jobs:
           KIS_ACCOUNT: ${{ secrets.KIS_ACCOUNT }}
           SHEET_WEBHOOK_URL: ${{ secrets.SHEET_WEBHOOK_URL }}
         run: python turtle_bot.py
+        
+      # (기존에 있던 Commit and push 로직은 영구 삭제되었습니다)
