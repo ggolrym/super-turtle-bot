@@ -1,5 +1,5 @@
 # ==========================================
-# 🐢 AI 멀티 에셋 터틀 봇 v9.7 (대시보드 + 구글 DB 락 회피 적용판)
+# 🐢 AI 터틀 봇 v9.6.2 (거대 유니버스 + 구글 DB 완전 독립판 + 타임아웃 30초)
 # ==========================================
 import os
 import yfinance as yf
@@ -20,8 +20,8 @@ KIS_APP_SECRET = os.environ.get("KIS_APP_SECRET")
 KIS_ACCOUNT = os.environ.get("KIS_ACCOUNT")
 SHEET_WEBHOOK_URL = os.environ.get("SHEET_WEBHOOK_URL") 
 
-if not all([GEMINI_API_KEY, DISCORD_WEBHOOK_URL, KIS_APP_KEY, KIS_APP_SECRET, KIS_ACCOUNT]):
-    print("🚨 API 키 또는 깃허브 시크릿 누락!")
+if not all([GEMINI_API_KEY, DISCORD_WEBHOOK_URL, KIS_APP_KEY, KIS_APP_SECRET, KIS_ACCOUNT, SHEET_WEBHOOK_URL]):
+    print("🚨 API 키 또는 웹훅 URL 누락!")
     exit()
 
 client = genai.Client(api_key=GEMINI_API_KEY)
@@ -34,7 +34,7 @@ def get_kis_token():
     try:
         res = requests.post(url, headers=headers, data=json.dumps(body), timeout=10)
         return res.json().get("access_token") if res.status_code == 200 else None
-    except Exception as e:
+    except:
         return None
 
 kis_token = get_kis_token()
@@ -61,7 +61,7 @@ def execute_order(ticker, qty, side="BUY", price=0.0):
     else:
         url = f"{KIS_URL}/uapi/overseas-stock/v1/trading/order"
         headers["tr_id"] = "VTTT1002U" if side == "BUY" else "VTTT1006U"
-        excg_cd = 'AMS' if clean_ticker in ['SPLG', 'SPY', 'GLDM', 'GLD', 'TLT', 'DBC', 'VNQ', 'SH', 'PSQ'] else 'NAS'
+        excg_cd = 'AMS' if clean_ticker in ['SPLG', 'SPY', 'GLDM', 'GLD', 'TLT', 'DBC', 'VNQ', 'SH', 'PSQ', 'QQQM'] else 'NAS'
         target_price = price * 1.01 if side == "BUY" else price * 0.99
         body = {"CANO": cano, "ACNT_PRDT_CD": prdt_cd, "OVRS_EXCG_CD": excg_cd, "PDNO": clean_ticker, "ORD_QTY": str(int(qty)), "OVRS_ORD_UNPR": str(round(target_price, 2)), "ORD_SVR_DVSN_CD": "0", "ORD_DVSN": "00"}
     
@@ -70,8 +70,9 @@ def execute_order(ticker, qty, side="BUY", price=0.0):
         data = res.json()
         if data.get("rt_cd") == "0": return {"success": True, "msg": "✅ 체결"}
         else: return {"success": False, "msg": f"❌ 거절({data.get('msg1')})"}
-    except Exception as e: return {"success": False, "msg": f"❌ 에러"}
+    except: return {"success": False, "msg": f"❌ 에러"}
 
+# 🌟 v9.6.2 자금 및 리스크 세팅 복원
 TOTAL_CAPITAL = 500000 
 RISK_PERCENT = 0.02        
 RISK_AMOUNT = TOTAL_CAPITAL * RISK_PERCENT
@@ -80,40 +81,57 @@ MAX_POSITION_KRW = 100000
 MAX_POSITIONS = 10          
 MAX_SECTOR_POSITIONS = 5       
 
-# 🌟 락(Lock) 회피 1단계: 깃허브 파일(portfolio.json) 대신 구글 시트에서 장부 읽기
+# 🌟 핵심 방어 1: 구글 시트(DB)에서 장부 가져오기 (타임아웃 30초 연장 적용)
 portfolio = {}
 print("구글 시트(DB)에서 포트폴리오를 불러옵니다...")
-if SHEET_WEBHOOK_URL:
-    try:
-        res = requests.get(SHEET_WEBHOOK_URL, timeout=10)
-        if res.status_code == 200:
-            data = res.json()
-            if isinstance(data, dict):
-                portfolio = data
-            else:
-                print("DB 데이터 형식이 잘못되었습니다. 빈 장부로 시작합니다.")
-    except Exception as e:
-        print(f"장부 불러오기 실패 (빈 장부로 시작): {e}")
+try:
+    res = requests.get(SHEET_WEBHOOK_URL, timeout=30) # 10초 -> 30초 넉넉하게 기다림
+    if res.status_code == 200:
+        data = res.json()
+        if isinstance(data, dict):
+            portfolio = data
+        else:
+            print("DB 데이터 형식이 잘못되었습니다. 빈 장부로 시작합니다.")
+            portfolio = {}
+except Exception as e:
+    print(f"장부 불러오기 실패 (빈 장부로 시작): {e}")
 
 exchange_rate = 1350.0
 try:
     ex_df = fdr.DataReader('USD/KRW')
     if not ex_df.empty: exchange_rate = float(ex_df['Close'].iloc[-1])
-except Exception: pass
+except: pass
 
-buy_signals, sell_signals, skipped_signals = [], [], []
-dashboard_list = [] 
+buy_signals, sell_signals = [], []
+dashboard_list = []
 
 def get_sector(ticker):
-    if ticker == 'GLDM': return 'Gold'
+    if ticker in ['GLDM', 'GLD']: return 'Gold'
     elif ticker == 'DBC': return 'Commodity'
+    elif ticker == 'TLT': return 'Bond'
+    elif ticker == 'VNQ': return 'RealEstate'
     elif ticker in ['SH', 'PSQ']: return 'Inverse' 
     return 'Stock'
 
-all_stocks = {'SPLG': 'SPDR 미니 S&P500', 'GLDM': 'SPDR 미니 금', 'DBC': 'Invesco 원자재', 'SH': 'S&P500 인버스', 'PSQ': '나스닥 인버스'}
+# 🌟 v9.6.2 거대 종목 유니버스 복원 (펀드매니저님의 오리지널 스케일)
+all_stocks = {
+    # 한국 주식 (테스트용 KODEX 및 우량주 일부)
+    '069500.KS': 'KODEX 200', '005930.KS': '삼성전자', '000660.KS': 'SK하이닉스',
+    
+    # 미국 주식 및 ETF
+    'SPLG': 'SPDR 미니 S&P500', 'QQQM': 'Invesco 미니 나스닥', 
+    'AAPL': 'Apple', 'MSFT': 'Microsoft', 'NVDA': 'NVIDIA',
+    
+    # 원자재 및 배당, 채권
+    'GLDM': 'SPDR 미니 금', 'DBC': 'Invesco 원자재', 
+    'TLT': '미국 20년물 채권', 'VNQ': '미국 리츠(부동산)',
+    
+    # 방어용 인버스
+    'SH': 'S&P500 인버스', 'PSQ': '나스닥 인버스'
+}
 
 current_positions = len(portfolio)
-current_sector_positions = {'Stock': 0, 'Gold': 0, 'Commodity': 0, 'Inverse': 0}
+current_sector_positions = {'Stock': 0, 'Gold': 0, 'Commodity': 0, 'Bond': 0, 'RealEstate': 0, 'Inverse': 0}
 for t in portfolio.keys(): 
     if get_sector(t) in current_sector_positions: current_sector_positions[get_sector(t)] += 1
 
@@ -168,6 +186,7 @@ if kis_token:
             elif ticker not in portfolio:
                 turnover_krw = (current_price * float(stock_data['Volume'].iloc[-21:-1].mean())) * (1 if is_krw else exchange_rate)
                 if turnover_krw < MIN_TURNOVER_KRW: continue
+                
                 volatility_ratio = (N / current_price) * 100
                 is_above_200 = current_price >= float(stock_data['Close'].rolling(window=200).mean().iloc[-1])
                 is_above_120 = current_price >= float(stock_data['Close'].rolling(window=120).mean().iloc[-1]) 
@@ -196,32 +215,30 @@ if kis_token:
                     "stop_loss": round(pos['stop_loss'], 2),
                     "trailing_stop": round(low_10, 2)
                 })
-        except Exception: continue
-        time.sleep(0.15)
+        except: continue
+        time.sleep(0.15) # 과부하 방지 딜레이 유지
 
-# (삭제됨) with open(PORTFOLIO_FILE, 'w' ... 로컬 저장 로직 완전 제거
-
-if not kis_token: final_content = "🚨 **터틀 펀드 시스템 경보** 🚨\nAPI 접속 실패로 스캔을 보류합니다."
+if not kis_token: final_content = "🚨 **시스템 경보** API 토큰 발급 실패"
 else:
     buy_text = '\n'.join(buy_signals[:10]) if buy_signals else '신호 없음'
     sell_text = '\n'.join(sell_signals[:10]) if sell_signals else '신호 없음'
     if buy_signals or sell_signals:
-        prompt = f"봇 체결결과 요약해라. 매수:{buy_text} 청산:{sell_text}"
-        res_text = ""
-        try: res_text = client.models.generate_content(model='gemini-2.0-flash', contents=prompt).text
+        try: res_text = client.models.generate_content(model='gemini-2.0-flash', contents=f"봇 체결결과 요약해라. 매수:{buy_text} 청산:{sell_text}").text
         except: res_text = f"매수:\n{buy_text}\n청산:\n{sell_text}"
-        final_content = f"🤖 **터틀 펀드 v9.7** 🤖\n{res_text}"
-    else: final_content = f"🤖 **터틀 펀드 v9.7** 🤖\n보유 종목 {current_positions}/{MAX_POSITIONS} 개. 시장 관망 중."
+        final_content = f"🤖 **터틀 펀드 v9.6.2 (DB독립)** 🤖\n{res_text}"
+    else: final_content = f"🤖 **터틀 펀드 v9.6.2 (DB독립)** 🤖\n보유 종목 {current_positions}/{MAX_POSITIONS} 개. 시장 관망 중."
 
 requests.post(DISCORD_WEBHOOK_URL, json={"content": final_content[:1900]})
 
-# 🌟 락(Lock) 회피 2단계: 구글 시트로 대시보드와 함께 장부(portfolio) 덮어쓰기
+# 🌟 핵심 방어 2: 구글 시트로 장부와 대시보드 덮어쓰기 (타임아웃 30초 연장 적용)
+sheet_data = {
+    "date": datetime.now(pytz.timezone('Asia/Seoul')).strftime('%Y-%m-%d %H:%M:%S'),
+    "message": f"매수 {len(buy_signals)}건, 청산 {len(sell_signals)}건" if (buy_signals or sell_signals) else "관망",
+    "dashboard": dashboard_list,
+    "portfolio": portfolio
+}
 if SHEET_WEBHOOK_URL:
-    sheet_data = {
-        "date": datetime.now(pytz.timezone('Asia/Seoul')).strftime('%Y-%m-%d %H:%M:%S'),
-        "message": f"매수 {len(buy_signals)}건, 청산 {len(sell_signals)}건" if (buy_signals or sell_signals) else "특이사항 없음",
-        "dashboard": dashboard_list,
-        "portfolio": portfolio # 🌟 깃허브 파일 변조 없이 구글 DB에 저장
-    }
-    try: requests.post(SHEET_WEBHOOK_URL, json=sheet_data, timeout=10)
-    except Exception as e: print(f"구글 시트 저장 실패: {e}")
+    try: 
+        requests.post(SHEET_WEBHOOK_URL, json=sheet_data, timeout=30) # 10초 -> 30초 넉넉하게 기다림
+    except Exception as e: 
+        print(f"구글 시트 저장 실패: {e}")
