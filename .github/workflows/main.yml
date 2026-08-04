@@ -3,7 +3,7 @@ name: Turtle Bot Auto Run
 on:
   schedule:
     # 한국장 마감 직전: 한국시간(KST) 오후 3시 17분 = UTC 오전 6시 17분
-    - cron: '2 6 * * 1-5'
+    - cron: '2 15 * * 1-5'
     
     # 미국장 마감 직전 (서머타임): 한국시간 오전 4시 42분 = UTC 오후 7시 42분
     - cron: '10 15 * * 1-5'
