@@ -1,5 +1,5 @@
 # ==========================================
-# 🐢 AI 하이브리드 터틀 봇 v11.2 (버크셔 에러 해결 & 구글 DB 디버깅 강화판)
+# 🐢 AI 하이브리드 터틀 봇 v11.3 (버크셔 에러 해결 & 구글/야후 3중 에러 방어판)
 # ==========================================
 import os
 import yfinance as yf
@@ -87,7 +87,7 @@ def execute_order(ticker, qty, side="BUY", price=0.0):
     except Exception as e: return {"success": False, "msg": f"❌ 에러({e})"}
 
 # ==========================================
-# 🌟 4. 자본 세팅 및 구글 DB 장부 연동
+# 🌟 4. 자본 세팅 및 구글 DB '강제 보호' 장부 연동
 # ==========================================
 TOTAL_CAPITAL = 500000      
 RISK_PERCENT = 0.02        
@@ -96,26 +96,40 @@ MIN_TURNOVER_KRW = 5000000000
 MIN_MARKET_CAP_KRW = 150000000000 
 MIN_PRICE_KRW = 2000 
 
-MAX_POSITION_KRW = 100000     
+MAX_POSITION_KRW = 200000     
 MAX_POSITIONS = 10          
 MAX_SECTOR_POSITIONS = 5       
 
 portfolio = {}
 print("구글 시트(DB)에서 포트폴리오를 불러옵니다...")
+
+# 🚨 [방어막 1] 구글 DB 통신 실패 시 '기억 상실'로 인한 덮어쓰기 방지
 if SHEET_WEBHOOK_URL:
-    try:
-        res = requests.get(SHEET_WEBHOOK_URL, timeout=30, allow_redirects=True)
-        if res.status_code == 200:
-            raw_text = res.text.strip()
-            if raw_text and raw_text.startswith('{') and raw_text.endswith('}'):
-                data = json.loads(raw_text)
-                if isinstance(data, dict): 
-                    portfolio = data
+    db_loaded = False
+    for attempt in range(3):
+        try:
+            res = requests.get(SHEET_WEBHOOK_URL, timeout=30, allow_redirects=True)
+            if res.status_code == 200:
+                raw_text = res.text.strip()
+                if raw_text and raw_text.startswith('{') and raw_text.endswith('}'):
+                    data = json.loads(raw_text)
+                    if isinstance(data, dict): 
+                        portfolio = data
+                db_loaded = True
+                break
             else:
-                # 💡 [디버깅 추가] 왜 구글이 제대로 안 주는지 앞 100글자만 출력해봅니다.
-                print(f"⚠️ DB 파싱 에러. (수신된 데이터 미리보기: {raw_text[:100]}...)")
-                print("⚠️ 빈 장부로 새롭게 시작합니다.")
-    except Exception as e: print(f"⚠️ 장부 불러오기 실패: {e}")
+                print(f"⚠️ 구글 DB 상태 코드 오류: {res.status_code}")
+                time.sleep(5)
+        except Exception as e:
+            print(f"⚠️ 구글 DB 통신 지연 (시도 {attempt+1}/3): {e}")
+            time.sleep(5)
+            
+    if not db_loaded:
+        error_msg = "🚨 **시스템 자동 정지** 구글 DB(장부) 응답 없음. 기존 보유 종목 데이터 소멸 및 덮어쓰기 위험을 감지하여 오늘 스캔 임무를 강제로 종료합니다."
+        print(error_msg)
+        try: requests.post(DISCORD_WEBHOOK_URL, json={"content": error_msg}, timeout=10)
+        except: pass
+        exit() # 여기서 봇 전원 강제 차단!
 
 exchange_rate = 1350.0
 try:
@@ -161,21 +175,14 @@ if target_market in ['US', 'ALL']:
         col_sym = 'Symbol' if 'Symbol' in us_df.columns else 'Ticker'
         col_name = 'Name' if 'Name' in us_df.columns else us_df.columns[1]
         
-        # 💡 [하드코딩 매핑] 야후 파이낸스에서 무조건 에러나는 악명 높은 티커 강제 교체
-        special_tickers = {
-            'BRKB': 'BRK-B',
-            'BFB': 'BF-B'
-        }
+        special_tickers = {'BRKB': 'BRK-B', 'BFB': 'BF-B'}
         
         for _, row in us_df.iterrows(): 
             raw_sym = str(row[col_sym])
-            
-            # 특수 케이스 먼저 적용
             if raw_sym in special_tickers:
                 clean_sym = special_tickers[raw_sym]
             else:
                 clean_sym = raw_sym.replace('.', '-').replace('/', '-')
-                
             all_stocks[clean_sym] = str(row[col_name])
     except: pass
 
@@ -196,13 +203,20 @@ print(f"🤖 총 {len(all_stocks)}개 종목 정밀 스캔 시작!")
 if kis_token: 
     for ticker, name in all_stocks.items():
         try:
+            # 🚨 [방어막 2] 야후 파이낸스 일시적 차단/오류 방어 (3회 재시도)
+            stock_data = pd.DataFrame()
             ticker_obj = yf.Ticker(ticker)
-            stock_data = ticker_obj.history(period='2y')
-            if stock_data.empty: continue
+            for attempt in range(3):
+                temp_data = ticker_obj.history(period='2y')
+                if not temp_data.empty and len(temp_data) >= 200:
+                    stock_data = temp_data
+                    break
+                time.sleep(1) # 1초 대기 후 재시도
+                
+            if stock_data.empty: continue # 3번 다 실패하면 깔끔하게 포기
             
             if isinstance(stock_data.columns, pd.MultiIndex): stock_data.columns = stock_data.columns.get_level_values(0)
             stock_data = stock_data.dropna()
-            if len(stock_data) < 200: continue
                 
             current_price = float(stock_data['Close'].iloc[-1])
             is_krw = ticker.endswith('.KS') or ticker.endswith('.KQ')
@@ -351,9 +365,9 @@ else:
             except Exception: time.sleep(5)
                 
         if not response_text: response_text = f"**매수**\n{buy_text}\n\n**청산**\n{sell_text}"
-        final_content = f"🤖 **하이브리드 터틀 v11.2 ({market_title})** 🤖\n{response_text}"
+        final_content = f"🤖 **하이브리드 터틀 v11.3 ({market_title})** 🤖\n{response_text}"
     else:
-        final_content = f"🤖 **하이브리드 터틀 v11.2 ({market_title} 관망)** 🤖\n감시 종목 {len(all_stocks)}개 / 보유 종목 {current_positions}/{MAX_POSITIONS} 개."
+        final_content = f"🤖 **하이브리드 터틀 v11.3 ({market_title} 관망)** 🤖\n감시 종목 {len(all_stocks)}개 / 보유 종목 {current_positions}/{MAX_POSITIONS} 개."
 
 if len(final_content) > 1900: final_content = final_content[:1900] + "\n\n... (⚠️ 요약됨)"
 
