@@ -242,6 +242,8 @@ if kis_token:
 
                 if ticker in portfolio:
                     pos = portfolio[ticker]
+                    # 👇 [추가] 매일매일 갱신되는 10일 저점을 장부(디스플레이)에도 덮어쓰기!
+                    pos['trailing_stop'] = low_10
                     if current_price <= pos['stop_loss'] or current_price <= low_10:
                         order_res = execute_order(ticker, pos['units'], side="SELL", price=current_price)
                         sell_signals.append(f"- [{name}] 전량 청산 ({pos['units']}주) ➞ {order_res['msg']}")
