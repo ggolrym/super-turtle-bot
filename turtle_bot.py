@@ -1,5 +1,5 @@
 # ==========================================
-# 🐢 AI 하이브리드 터틀 봇 V12.2 (단기/장기 5:5 밸런싱 완성판)
+# 🐢 AI 하이브리드 터틀 봇 V12.0 (스마트 랭킹 엔진 & 3중 방어막 탑재판)
 # ==========================================
 import os
 import yfinance as yf
@@ -87,9 +87,9 @@ def execute_order(ticker, qty, side="BUY", price=0.0):
     except Exception as e: return {"success": False, "msg": f"❌ 에러({e})"}
 
 # ==========================================
-# 🌟 4. 자본 및 밸런싱 세팅 / 구글 DB 연동
+# 🌟 4. 자본 세팅 및 구글 DB '강제 보호' 장부 연동
 # ==========================================
-TOTAL_CAPITAL = 500000      
+TOTAL_CAPITAL = 1000000      
 RISK_PERCENT = 0.02        
 RISK_AMOUNT = TOTAL_CAPITAL * RISK_PERCENT
 MIN_TURNOVER_KRW = 5000000000 
@@ -97,11 +97,7 @@ MIN_MARKET_CAP_KRW = 150000000000
 MIN_PRICE_KRW = 2000 
 
 MAX_POSITION_KRW = 100000     
-
-# 👇 [추가] 단기/장기 밸런싱 쿼터(Quota) 설정
 MAX_POSITIONS = 10          
-MAX_KR_POSITIONS = 5        
-MAX_US_POSITIONS = 5        
 MAX_SECTOR_POSITIONS = 5       
 
 portfolio = {}
@@ -159,7 +155,7 @@ def calculate_rsi(series, period=14):
     return 100 - (100 / (1 + rs))
 
 # ==========================================
-# 🌟 5. 타겟 시장 유니버스 생성 및 상태 파악
+# 🌟 5. 타겟 시장 유니버스 생성 
 # ==========================================
 all_stocks = {}
 
@@ -179,6 +175,7 @@ if target_market in ['US', 'ALL']:
         col_name = 'Name' if 'Name' in us_df.columns else us_df.columns[1]
         
         special_tickers = {'BRKB': 'BRK-B', 'BFB': 'BF-B'}
+        
         for _, row in us_df.iterrows(): 
             raw_sym = str(row[col_sym])
             if raw_sym in special_tickers: clean_sym = special_tickers[raw_sym]
@@ -189,25 +186,18 @@ if target_market in ['US', 'ALL']:
 for t in portfolio.keys():
     if t not in all_stocks: all_stocks[t] = portfolio[t]['name']
 
-# 👇 [수정] 단기/장기 포지션 개수 따로 카운트
 current_positions = len(portfolio)
-current_kr_positions = 0
-current_us_positions = 0
 current_sector_positions = {'Stock': 0, 'Gold': 0, 'Commodity': 0, 'Bond': 0, 'RealEstate': 0, 'Inverse': 0}
-
-for t, p in portfolio.items(): 
+for t in portfolio.keys(): 
     sec = get_sector(t)
     if sec in current_sector_positions: current_sector_positions[sec] += 1
-    
-    if p.get('strategy') == 'KR_SWING': current_kr_positions += 1
-    elif p.get('strategy') == 'US_TURTLE': current_us_positions += 1
 
-print(f"📊 현재 계좌 밸런스: 단기(KR) {current_kr_positions}개 / 장기(US) {current_us_positions}개")
 print(f"🤖 총 {len(all_stocks)}개 종목 정밀 스캔 및 랭킹 분석 시작!")
 
 # ==========================================
 # 🌟 6. [지능형 랭킹 엔진] 매매 스캔 및 실행
 # ==========================================
+# 장바구니 준비 및 실시간 가격 저장소
 kr_candidates = []
 us_candidates = []
 prices_cache = {}
@@ -231,7 +221,7 @@ if kis_token:
             stock_data = stock_data.dropna()
                 
             current_price = float(stock_data['Close'].iloc[-1])
-            prices_cache[ticker] = current_price 
+            prices_cache[ticker] = current_price # 대시보드용 가격 저장
             
             is_krw = ticker.endswith('.KS') or ticker.endswith('.KQ')
             ticker_market = 'KR' if is_krw else 'US'
@@ -254,7 +244,6 @@ if kis_token:
                 tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
                 N = float(tr.rolling(window=20).mean().iloc[-1])
                 ma_120 = float(stock_data['Close'].rolling(window=120).mean().iloc[-1])
-                rsi_14_us = float(calculate_rsi(stock_data['Close'], 14).iloc[-1])
                 
                 if pd.isna(N) or N <= 0 or current_price_krw > MAX_POSITION_KRW: continue
                 N_krw = N * exchange_rate
@@ -264,7 +253,7 @@ if kis_token:
                     unit_size = math.floor(MAX_POSITION_KRW / current_price_krw)
                     if unit_size == 0: continue 
 
-                # 기존 보유 종목 매도 시 카운터 감소 추가
+                # 기존 보유 종목 즉시 관리 (매도 / 불타기)
                 if ticker in portfolio:
                     pos = portfolio[ticker]
                     pos['trailing_stop'] = low_10
@@ -272,7 +261,7 @@ if kis_token:
                         order_res = execute_order(ticker, pos['units'], side="SELL", price=current_price)
                         sell_signals.append(f"- [{name}] 전량 청산 ({pos['units']}주) ➞ {order_res['msg']}")
                         if order_res['success']:
-                            current_positions -= 1; current_sector_positions[sector] -= 1; current_us_positions -= 1
+                            current_positions -= 1; current_sector_positions[sector] -= 1
                             del portfolio[ticker] 
                     else:
                         chunks = pos.get('chunks', 1)
@@ -283,7 +272,7 @@ if kis_token:
                                 pos['units'] += unit_size; pos['chunks'] = chunks + 1
                                 pos['last_buy_price'] = current_price; pos['stop_loss'] = current_price - (2 * N)
 
-                # 신규 타점 발견 시 장바구니에 담기 (과열 컷오프 유지)
+                # 신규 타점 발견 시 장바구니에 담기
                 elif ticker not in portfolio:
                     turnover_krw = (current_price * float(stock_data['Volume'].iloc[-21:-1].mean())) * exchange_rate
                     if turnover_krw < MIN_TURNOVER_KRW: continue
@@ -291,15 +280,10 @@ if kis_token:
 
                     recent_20_high = float(stock_data['High'].iloc[-21:-1].max())
                     if current_price >= recent_20_high:
-                        if rsi_14_us >= 80.0:
-                            skipped_signals.append(f"- [{name}] 초과열 컷오프 (RSI: {rsi_14_us:.1f})")
-                            continue
-                            
-                        momentum = current_price / ma_120 
-                        # 'market' 라벨 추가
+                        momentum = current_price / ma_120 # 랭킹 기준 1: 120일선 대비 강도
                         us_candidates.append({
                             'ticker': ticker, 'name': name, 'unit_size': unit_size, 'price': current_price,
-                            'N': N, 'low_10': low_10, 'momentum': momentum, 'sector': sector, 'market': 'US', 'chart_link': chart_link
+                            'N': N, 'low_10': low_10, 'momentum': momentum, 'sector': sector, 'chart_link': chart_link
                         })
 
             # ------------------------------------
@@ -324,7 +308,7 @@ if kis_token:
                 unit_size = math.floor(MAX_POSITION_KRW / current_price_krw)
                 if unit_size == 0: continue
 
-                # 기존 보유 종목 매도 시 카운터 감소 추가
+                # 기존 보유 종목 즉시 관리 (매도)
                 if ticker in portfolio:
                     pos = portfolio[ticker]
                     profit_pct = (current_price - pos['last_buy_price']) / pos['last_buy_price'] * 100
@@ -333,7 +317,7 @@ if kis_token:
                         order_res = execute_order(ticker, pos['units'], side="SELL", price=current_price)
                         sell_signals.append(f"- [{name}] {reason} ({pos['units']}주) ➞ {order_res['msg']}")
                         if order_res['success']:
-                            current_positions -= 1; current_sector_positions[sector] -= 1; current_kr_positions -= 1
+                            current_positions -= 1; current_sector_positions[sector] -= 1
                             del portfolio[ticker] 
 
                 # 신규 타점 발견 시 장바구니에 담기
@@ -341,52 +325,46 @@ if kis_token:
                     if rsi_14 <= 30.0 and current_price <= bb_lower:
                         kr_candidates.append({
                             'ticker': ticker, 'name': name, 'unit_size': unit_size, 'price': current_price,
-                            'rsi': rsi_14, 'ma_20': ma_20, 'sector': sector, 'market': 'KR', 'chart_link': chart_link
+                            'rsi': rsi_14, 'ma_20': ma_20, 'sector': sector, 'chart_link': chart_link
                         })
 
         except Exception: continue
         time.sleep(0.15) 
 
     # ==================================================
-    # 2단계: 랭킹 정렬 및 밸런싱 매수 실행 (Rank & Balance)
+    # 2단계: 랭킹 정렬 및 1등부터 실제 매수 실행 (Rank & Execution)
     # ==================================================
+    # 🇺🇸 미국장: 모멘텀(추세강도)이 높은 순서로 정렬 (내림차순)
     us_candidates.sort(key=lambda x: x['momentum'], reverse=True)
+    # 🇰🇷 한국장: RSI(투매강도)가 가장 낮은 순서로 정렬 (오름차순)
     kr_candidates.sort(key=lambda x: x['rsi'])
     
     all_candidates = us_candidates + kr_candidates
     
     for cand in all_candidates:
         if current_positions >= MAX_POSITIONS: 
-            skipped_signals.append(f"- [{cand['name']}] 전체 계좌 꽉참 (보류)")
-            break # 10개 꽉차면 전체 스탑
-            
-        # 👇 [신규 방어막] 국가별/전략별 5개 한도 체크
-        if cand['market'] == 'KR' and current_kr_positions >= MAX_KR_POSITIONS:
-            skipped_signals.append(f"- [{cand['name']}] 단기(KR) 5개 한도 초과 (보류)")
+            skipped_signals.append(f"- [{cand['name']}] 한도 꽉참 (보류)")
             continue
-            
-        if cand['market'] == 'US' and current_us_positions >= MAX_US_POSITIONS:
-            skipped_signals.append(f"- [{cand['name']}] 장기(US) 5개 한도 초과 (보류)")
-            continue
-            
         if current_sector_positions[cand['sector']] >= MAX_SECTOR_POSITIONS: 
             skipped_signals.append(f"- [{cand['name']}] 섹터 제한 (보류)")
             continue
             
         order_res = execute_order(cand['ticker'], cand['unit_size'], side="BUY", price=cand['price'])
         
-        if cand['market'] == 'KR':
-            buy_signals.append(f"- 🥇 [{cand['name']}] 📉 단기 픽(RSI: {cand['rsi']:.1f}) ➞ {order_res['msg']} [차트]({cand['chart_link']})")
+        # 한국장 후보였을 경우
+        if cand in kr_candidates:
+            buy_signals.append(f"- 🥇 [{cand['name']}] 📉 랭킹 픽(RSI: {cand['rsi']:.1f}) ➞ {order_res['msg']} [차트]({cand['chart_link']})")
             if order_res['success']:
                 portfolio[cand['ticker']] = {'name': cand['name'], 'units': cand['unit_size'], 'chunks': 1, 'last_buy_price': cand['price'], 'stop_loss': cand['price'] * 0.95, 'trailing_stop': cand['ma_20'], 'strategy': 'KR_SWING'}
-                current_positions += 1; current_sector_positions[cand['sector']] += 1; current_kr_positions += 1
+                current_positions += 1; current_sector_positions[cand['sector']] += 1
+        # 미국장 후보였을 경우
         else:
-            buy_signals.append(f"- 🥇 [{cand['name']}] ✨ 장기 픽(모멘텀: {cand['momentum']:.2f}) ➞ {order_res['msg']} [차트]({cand['chart_link']})")
+            buy_signals.append(f"- 🥇 [{cand['name']}] ✨ 랭킹 픽(모멘텀: {cand['momentum']:.2f}) ➞ {order_res['msg']} [차트]({cand['chart_link']})")
             if order_res['success']:
                 portfolio[cand['ticker']] = {'name': cand['name'], 'units': cand['unit_size'], 'chunks': 1, 'last_buy_price': cand['price'], 'stop_loss': cand['price'] - (2 * cand['N']), 'trailing_stop': cand['low_10'], 'strategy': 'US_TURTLE'}
-                current_positions += 1; current_sector_positions[cand['sector']] += 1; current_us_positions += 1
+                current_positions += 1; current_sector_positions[cand['sector']] += 1
 
-# 대시보드 리스트 생성 
+# 대시보드 리스트 생성 (최종 업데이트된 포트폴리오 기준)
 for ticker, pos in portfolio.items():
     cp = prices_cache.get(ticker, pos['last_buy_price'])
     dashboard_list.append({
@@ -414,9 +392,9 @@ else:
             except Exception: time.sleep(5)
                 
         if not response_text: response_text = f"**매수**\n{buy_text}\n\n**청산**\n{sell_text}"
-        final_content = f"🤖 **하이브리드 터틀 V12.2 ({market_title})** 🤖\n{response_text}"
+        final_content = f"🤖 **하이브리드 터틀 V12.0 ({market_title})** 🤖\n{response_text}"
     else:
-        final_content = f"🤖 **하이브리드 터틀 V12.2 ({market_title} 관망)** 🤖\n감시 {len(all_stocks)}개 / 현재 잔고: 단기 {current_kr_positions}개, 장기 {current_us_positions}개."
+        final_content = f"🤖 **하이브리드 터틀 V12.0 ({market_title} 관망)** 🤖\n감시 종목 {len(all_stocks)}개 / 보유 종목 {current_positions}/{MAX_POSITIONS} 개."
 
 if len(final_content) > 1900: final_content = final_content[:1900] + "\n\n... (⚠️ 요약됨)"
 
@@ -427,7 +405,7 @@ except Exception as e:
 
 if SHEET_WEBHOOK_URL:
     kr_time = datetime.now(pytz.timezone('Asia/Seoul')).strftime('%Y-%m-%d %H:%M:%S')
-    buy_count = len([s for s in buy_signals if '신규 진입' in s or '단기 픽' in s or '장기 픽' in s])
+    buy_count = len([s for s in buy_signals if '신규 진입' in s or '랭킹 픽' in s])
     sell_count = len(sell_signals)
     summary_msg = f"매수 {buy_count}건, 청산 {sell_count}건" if (buy_count > 0 or sell_count > 0) else "관망 중"
     
