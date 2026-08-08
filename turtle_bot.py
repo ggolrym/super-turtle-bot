@@ -1,5 +1,5 @@
 # ==========================================
-# 🐢 AI 하이브리드 터틀 봇 V12.0 (스마트 랭킹 엔진 & 3중 방어막 탑재판)
+# 🐢 AI 하이브리드 터틀 봇 V12.0 (스마트 랭킹 엔진 & 3중 방어막 탑재판) - 오류 수정 완료
 # ==========================================
 import os
 import yfinance as yf
@@ -28,7 +28,7 @@ if not all([GEMINI_API_KEY, DISCORD_WEBHOOK_URL, KIS_APP_KEY, KIS_APP_SECRET, KI
 client = genai.Client(api_key=GEMINI_API_KEY)
 KIS_URL = "https://openapivts.koreainvestment.com:29443" 
 
-# 🌟 2. 시간 감지 및 타겟 시장 설정
+# 🌟 2. 시간 감지 및 타겟 시장 설정 (오류 수정 완료)
 kr_time = datetime.now(pytz.timezone('Asia/Seoul'))
 kr_hour = kr_time.hour
 
@@ -39,13 +39,6 @@ if 12 <= kr_hour <= 17:
 elif 2 <= kr_hour <= 8:
     target_market = 'US'
     market_title = "🇺🇸 미국장(터틀 추세추종)"
-else:
-    target_market = 'ALL'
-    market_title = "🌐 통합 테스트"
-
-print(f"⏰ 현재 한국시간: {kr_time.strftime('%Y-%m-%d %H:%M:%S')}")
-print(f"🎯 타겟 스캔 시장: {market_title}\n")
-
 else:
     target_market = 'ALL'
     market_title = "🌐 통합 테스트"
@@ -128,7 +121,7 @@ if SHEET_WEBHOOK_URL:
                 print(f"⚠️ 구글 DB 상태 코드 오류: {res.status_code}")
                 time.sleep(5)
         except Exception as e:
-            print(f"⚠️ 구글 DB 통신 지연 (시도 {attempt+1}/3): {e}")
+            print(f"⚠️ 구글 DB 통 지연 (시도 {attempt+1}/3): {e}")
             time.sleep(5)
             
     if not db_loaded:
