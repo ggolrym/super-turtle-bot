@@ -32,12 +32,20 @@ KIS_URL = "https://openapivts.koreainvestment.com:29443"
 kr_time = datetime.now(pytz.timezone('Asia/Seoul'))
 kr_hour = kr_time.hour
 
-if 14 <= kr_hour <= 16:
+# 👇 깃허브 시간 지연(2시간 조기 예약)을 반영하여 로봇의 인식 시간대를 대폭 확장!
+if 12 <= kr_hour <= 17:
     target_market = 'KR'
     market_title = "🇰🇷 한국장(낙폭과대 우량주 스윙)"
-elif 4 <= kr_hour <= 7:
+elif 2 <= kr_hour <= 8:
     target_market = 'US'
     market_title = "🇺🇸 미국장(터틀 추세추종)"
+else:
+    target_market = 'ALL'
+    market_title = "🌐 통합 테스트"
+
+print(f"⏰ 현재 한국시간: {kr_time.strftime('%Y-%m-%d %H:%M:%S')}")
+print(f"🎯 타겟 스캔 시장: {market_title}\n")
+
 else:
     target_market = 'ALL'
     market_title = "🌐 통합 테스트"
