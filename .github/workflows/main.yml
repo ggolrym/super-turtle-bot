@@ -2,13 +2,15 @@ name: Super Turtle Bot
 
 on:
   schedule:
-    # 🇰🇷 목표: KST 14:55 / 오차 역산 적용 -> KST 12:45 (UTC 03:45) 예약
-    - cron: '45 3 * * 1-6'
-    # 🇺🇸 목표: KST 04:55 / 오차 역산 적용 -> KST 02:45 (UTC 17:45) 예약
-    - cron: '45 17 * * 1-6'
+    # 🇰🇷 목표: KST 14:55 (오차 역산 적용 -> KST 12:45 / UTC 03:45)
+    # 기존 1-5(월~금)에서 *(매일)로 변경하여 주말 테스트 허용
+    - cron: '45 3 * * *'
+    
+    # 🇺🇸 목표: KST 04:55 (오차 역산 적용 -> KST 02:45 / UTC 17:45)
+    # 기존 1-5(월~금)에서 *(매일)로 변경하여 주말 테스트 허용
+    - cron: '45 17 * * *'
   workflow_dispatch:
 
-# 🚨 핵심 방어막: 봇 동시 실행 및 충돌 완벽 차단 (자물쇠)
 concurrency:
   group: turtle-bot-run
   cancel-in-progress: false
