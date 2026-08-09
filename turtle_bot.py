@@ -90,16 +90,16 @@ def execute_order(ticker, qty, side="BUY", price=0.0):
 # ==========================================
 # 🌟 4. 자본 세팅 및 구글 DB '강제 보호' 장부 연동
 # ==========================================
-TOTAL_CAPITAL = 1000000      
+TOTAL_CAPITAL = 500000      
 RISK_PERCENT = 0.02        
 RISK_AMOUNT = TOTAL_CAPITAL * RISK_PERCENT
 MIN_TURNOVER_KRW = 5000000000 
 MIN_MARKET_CAP_KRW = 150000000000 
 MIN_PRICE_KRW = 2000 
 
-MAX_POSITION_KRW = 100000     
-MAX_POSITIONS = 10          
-MAX_SECTOR_POSITIONS = 5       
+MAX_POSITION_KRW = 150000     
+MAX_POSITIONS = 4          
+MAX_SECTOR_POSITIONS = 2       
 
 portfolio = {}
 print("구글 시트(DB)에서 포트폴리오를 불러옵니다...")
@@ -313,7 +313,7 @@ if kis_token:
                 if ticker in portfolio:
                     pos = portfolio[ticker]
                     profit_pct = (current_price - pos['last_buy_price']) / pos['last_buy_price'] * 100
-                    if profit_pct >= 5.0 or profit_pct <= -5.0:
+                    if profit_pct >= 7.0 or profit_pct <= -5.0:
                         reason = "🎯 5% 익절" if profit_pct > 0 else "🔪 -5% 손절"
                         order_res = execute_order(ticker, pos['units'], side="SELL", price=current_price)
                         sell_signals.append(f"- [{name}] {reason} ({pos['units']}주) ➞ {order_res['msg']}")
