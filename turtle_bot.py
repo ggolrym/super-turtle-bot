@@ -313,7 +313,7 @@ if kis_token:
                 if ticker in portfolio:
                     pos = portfolio[ticker]
                     profit_pct = (current_price - pos['last_buy_price']) / pos['last_buy_price'] * 100
-                    if profit_pct >= 7.0 or profit_pct <= -5.0:
+                    if profit_pct >= 5.0 or profit_pct <= -5.0:
                         reason = "🎯 5% 익절" if profit_pct > 0 else "🔪 -5% 손절"
                         order_res = execute_order(ticker, pos['units'], side="SELL", price=current_price)
                         sell_signals.append(f"- [{name}] {reason} ({pos['units']}주) ➞ {order_res['msg']}")
