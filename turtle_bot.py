@@ -1,5 +1,5 @@
 # ==========================================
-# 🐢 AI 하이브리드 터틀 봇 V15.0 (기관급 트레일링 스탑 & 슬리피지 방어 탑재판)
+# 🐢 AI 하이브리드 터틀 봇 V15.0 (기관급 트레일링 스탑 & 슬리피지 방어 탑재판 - 오타 수정 완료)
 # ==========================================
 import os
 import yfinance as yf
@@ -30,8 +30,9 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 KIS_URL = "https://openapivts.koreainvestment.com:29443" 
 kr_time = datetime.now(pytz.timezone('Asia/Seoul'))
 
+# 👇 [수정 완료] 코스닥 부분의 변수 누락 에러 완벽 해결
 if RUN_MARKET == 'KOSPI': target_market, market_title = 'KR_KOSPI', "🇰🇷 코스피 전용 스캔"
-elif RUN_MARKET == 'KOSDAQ': target_market, market_title = '🚀 코스닥 전용 스캔'
+elif RUN_MARKET == 'KOSDAQ': target_market, market_title = 'KR_KOSDAQ', "🚀 코스닥 전용 스캔"
 elif RUN_MARKET == 'US': target_market, market_title = 'US', "🇺🇸 미국장 전용 스캔"
 else: target_market, market_title = 'ALL', "🌐 통합 테스트 모드"
 
@@ -51,7 +52,7 @@ def get_kis_token():
 kis_token = get_kis_token()
 print("✅ KIS 토큰 발급 완료!" if kis_token else "❌ KIS 토큰 발급 실패. 임무를 보류합니다.")
 
-# 👇 [V15.0 패치] 슬리피지 방어 (시장가 01 -> 지정가 00으로 강제 변경하여 최신가 쏘기)
+# [V15.0 패치] 슬리피지 방어 (시장가 01 -> 지정가 00으로 강제 변경하여 최신가 쏘기)
 def execute_order(ticker, qty, side="BUY", price=0.0):
     if not kis_token: return {"success": False, "msg": "토큰 없음"}
     time.sleep(0.5) 
@@ -82,7 +83,7 @@ def execute_order(ticker, qty, side="BUY", price=0.0):
         except: pass
         if clean_ticker in ['SPLG', 'SPY', 'GLDM', 'GLD', 'TLT', 'DBC', 'VNQ', 'SH', 'PSQ', 'QQQM']: excg_cd = 'AMS'
             
-        target_price = round(price, 2) # 미국장도 가격 올리기/내리기 꼼수 없애고 정확한 현재가 지정
+        target_price = round(price, 2)
         body = {"CANO": cano, "ACNT_PRDT_CD": prdt_cd, "OVRS_EXCG_CD": excg_cd, "PDNO": clean_ticker, "ORD_QTY": str(int(qty)), "OVRS_ORD_UNPR": f"{target_price:.2f}", "ORD_SVR_DVSN_CD": "0", "ORD_DVSN": "00"}
     
     try:
@@ -142,7 +143,7 @@ def sync_portfolio_with_kis_balance(current_portfolio):
     cano, prdt_cd = clean_account[:8], (clean_account[8:10] if len(clean_account) >= 10 else "01")
     tr_prefix = "V" if "openapivts" in KIS_URL else "T"
     
-    actual_tickers = {} # 수량까지 추적
+    actual_tickers = {} 
     headers = {"Content-Type": "application/json; charset=utf-8", "authorization": f"Bearer {kis_token}", "appkey": KIS_APP_KEY, "appsecret": KIS_APP_SECRET}
     
     try:
@@ -169,7 +170,6 @@ def sync_portfolio_with_kis_balance(current_portfolio):
     for t, p in current_portfolio.items():
         clean_t = t.split('.')[0]
         if clean_t in actual_tickers or t in actual_tickers: 
-            # 실제 계좌의 수량이 반토막(반절 익절) 났으면 장부 수량도 맞춰줌
             actual_qty = actual_tickers.get(clean_t, actual_tickers.get(t, p['units']))
             p['units'] = actual_qty
             synced_portfolio[t] = p
@@ -366,7 +366,7 @@ if kis_token:
                         })
 
             # ------------------------------------
-            # 🇰🇷 코스피 로직 (스윙: V15.0 반반 익절 + 트레일링 스탑 적용)
+            # 🇰🇷 코스피 로직 (스윙: 반반 익절 + 트레일링 스탑 적용)
             # ------------------------------------
             elif is_kr_kospi and target_market in ['KR_KOSPI', 'ALL']:
                 if current_price < MIN_PRICE_KRW or current_price_krw > MAX_POSITION_KRW: continue
@@ -386,7 +386,6 @@ if kis_token:
                     pos = portfolio[ticker]
                     profit_pct = (current_price - pos['last_buy_price']) / pos['last_buy_price'] * 100
                     
-                    # 👇 [V15.0 패치] +5% 도달 시 절반 매도, 나머지는 20일선 깰 때까지 홀딩
                     half_sell_flag = pos.get('half_sold', False)
                     
                     if profit_pct >= 5.0 and not half_sell_flag and pos['units'] > 1:
@@ -396,7 +395,7 @@ if kis_token:
                         if order_res['success']:
                             pos['units'] -= sell_qty
                             pos['half_sold'] = True
-                            pos['stop_loss'] = pos['last_buy_price'] # 본전 위협 시 컷
+                            pos['stop_loss'] = pos['last_buy_price'] 
                             
                     elif current_price <= pos['stop_loss'] or (half_sell_flag and current_price < ma_20):
                         reason = "🔪 손절/본전컷" if current_price <= pos['last_buy_price'] else "💰 트레일링 스탑 익절"
@@ -414,7 +413,7 @@ if kis_token:
                         })
 
             # ------------------------------------
-            # 🚀 코스닥 로직 (돌파: V15.0 윗꼬리 가짜돌파 필터링)
+            # 🚀 코스닥 로직 (돌파: 윗꼬리 가짜돌파 필터링)
             # ------------------------------------
             elif is_kr_kosdaq and target_market in ['KR_KOSDAQ', 'ALL']:
                 if current_price < MIN_PRICE_KRW or current_price_krw > MAX_POSITION_KRW: continue
@@ -449,12 +448,11 @@ if kis_token:
                     recent_20_high = float(stock_data['High'].iloc[-21:-1].max())
                     ma_120 = float(stock_data['Close'].rolling(window=120).mean().iloc[-1])
                     
-                    # 👇 [V15.0 패치] 종가 위치 필터: 윗꼬리가 긴 음봉이나 도지형 거르기 (캔들 상위 30% 이내 종가 마감 시에만)
                     daily_high = float(stock_data['High'].iloc[-1])
                     daily_low = float(stock_data['Low'].iloc[-1])
                     if daily_high > daily_low:
                         close_position_ratio = (daily_high - current_price) / (daily_high - daily_low)
-                    else: close_position_ratio = 1.0 # 거래정지 등 캔들 없을시 거름
+                    else: close_position_ratio = 1.0 
                     
                     if current_price >= recent_20_high and current_price > ma_120 and close_position_ratio <= 0.30:
                         kq_breakout_candidates.append({
