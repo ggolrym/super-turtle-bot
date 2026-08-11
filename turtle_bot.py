@@ -1,5 +1,5 @@
 # ==========================================
-# 🐢 AI 하이브리드 터틀 봇 V15.2 (실전 자동매매 통합판)
+# 🐢 AI 하이브리드 터틀 봇 V16.3 (우선순위 최적화: US -> KOSDAQ -> KOSPI)
 # ==========================================
 import os
 import yfinance as yf
@@ -27,15 +27,13 @@ if not all([GEMINI_API_KEY, DISCORD_WEBHOOK_URL, KIS_APP_KEY, KIS_APP_SECRET, KI
     exit()
 
 client = genai.Client(api_key=GEMINI_API_KEY)
-
-# 💡 모의투자 전용 도메인 고정
-KIS_URL = "https://openapivts.koreainvestment.com:29443" 
+KIS_URL = "https://openapivts.koreainvestment.com:29443" # 모의투자 전용 도메인
 
 kr_time = datetime.now(pytz.timezone('Asia/Seoul'))
 
-if RUN_MARKET == 'KOSPI': target_market, market_title = 'KR_KOSPI', "🇰🇷 코스피 전용 스캔"
-elif RUN_MARKET == 'KOSDAQ': target_market, market_title = 'KR_KOSDAQ', "🚀 코스닥 전용 스캔"
-elif RUN_MARKET == 'US': target_market, market_title = 'US', "🇺🇸 미국장 전용 스캔"
+if RUN_MARKET == 'KOSPI': target_market, market_title = 'KR_KOSPI', "🇰🇷 코스피 (스윙 & 무한 트레일링)"
+elif RUN_MARKET == 'KOSDAQ': target_market, market_title = 'KR_KOSDAQ', "🚀 코스닥 (수급 대장주 돌파)"
+elif RUN_MARKET == 'US': target_market, market_title = 'US', "🇺🇸 미국장 (터틀 추세추종)"
 else: target_market, market_title = 'ALL', "🌐 통합 테스트 모드"
 
 print(f"⏰ 현재 한국시간: {kr_time.strftime('%Y-%m-%d %H:%M:%S')}")
@@ -97,19 +95,23 @@ def execute_order(ticker, qty, side="BUY", price=0.0):
 # 🌟 3. 자본 세팅 (50만 원) 및 실잔고 동기화
 # ==========================================
 TOTAL_CAPITAL = 500000      
-RISK_PERCENT = 0.02        
+RISK_PERCENT = 0.02         
 RISK_AMOUNT = TOTAL_CAPITAL * RISK_PERCENT
 
-MIN_TURNOVER_KRW = 5000000000      # 코스피 50억
-KOSDAQ_MIN_TURNOVER = 3000000000   # 코스닥 30억
+MIN_TURNOVER_KRW = 5000000000      
+KOSDAQ_MIN_TURNOVER = 3000000000   
 MIN_MARKET_CAP_KRW = 100000000000 
-MIN_PRICE_KRW = 1000               # 1000원 이상
+MIN_PRICE_KRW = 1000               
 
 MAX_POSITIONS = 4          
 MAX_KR_POSITIONS = 2        
 MAX_US_POSITIONS = 2        
 MAX_SECTOR_POSITIONS = 2       
-MAX_POSITION_KRW = 150000   # 종목당 최대 15만 원
+MAX_POSITION_KRW = 150000     
+
+MIN_HOLD_DAYS = 3               
+SWAP_PROFIT_THRESHOLD = -3.0    
+MAX_SWAPS_PER_DAY = 1           
 
 buy_signals, sell_signals, skipped_signals = [], [], []
 dashboard_list = [] 
@@ -202,7 +204,7 @@ def calculate_rsi(series, period=14):
     return rsi
 
 # ==========================================
-# 🌟 4. [런타임 최적화] 사전 필터링 유니버스
+# 🌟 4. 사전 필터링 유니버스 (초고속 스캔)
 # ==========================================
 all_stocks = {}
 print("⏳ 시장 유니버스 사전 필터링 중...")
@@ -263,7 +265,7 @@ print(f"📊 동기화된 계좌: 한국장 {current_kr_positions}개 / 미국�
 print(f"⚡ 사전 필터링 완료! 정예 종목 정밀 스캔 시작!")
 
 # ==========================================
-# 🌟 5. [지능형 랭킹 엔진] 스캔 및 로직
+# 🌟 5. [지능형 랭킹 엔진] 스캔 및 매도 로직
 # ==========================================
 kr_swing_candidates = []      
 kq_breakout_candidates = []   
@@ -313,7 +315,7 @@ if kis_token:
             chart_link = f"https://finance.naver.com/item/fchart.naver?code={clean_ticker}" if (is_kr_kospi or is_kr_kosdaq) else f"https://finance.yahoo.com/quote/{ticker}/chart"
 
             # ------------------------------------
-            # 🇺🇸 미국장 로직 (터틀 추세추종)
+            # 🇺🇸 미국장 로직 (터틀)
             # ------------------------------------
             if is_us and target_market in ['US', 'ALL']:
                 low_10 = float(stock_data['Low'].iloc[-11:-1].min())
@@ -354,7 +356,7 @@ if kis_token:
                 elif ticker not in portfolio:
                     turnover_krw = (current_price * float(stock_data['Volume'].iloc[-21:-1].mean())) * exchange_rate
                     if turnover_krw < MIN_TURNOVER_KRW: continue
-                    if sector == 'Stock' and current_price < ma_120: continue      
+                    if sector == 'Stock' and current_price < ma_120: continue     
 
                     recent_20_high = float(stock_data['High'].iloc[-21:-1].max())
                     if current_price >= recent_20_high:
@@ -366,7 +368,7 @@ if kis_token:
                         })
 
             # ------------------------------------
-            # 🇰🇷 코스피 로직 (스윙: RSI 35 완화 및 반반 익절)
+            # 🇰🇷 코스피 로직 (스윙: 무제한 트레일링 스탑)
             # ------------------------------------
             elif is_kr_kospi and target_market in ['KR_KOSPI', 'ALL']:
                 if current_price < MIN_PRICE_KRW or current_price_krw > MAX_POSITION_KRW: continue
@@ -382,20 +384,12 @@ if kis_token:
 
                 if ticker in portfolio:
                     pos = portfolio[ticker]
-                    profit_pct = (current_price - pos['last_buy_price']) / pos['last_buy_price'] * 100
-                    half_sell_flag = pos.get('half_sold', False)
                     
-                    if profit_pct >= 5.0 and not half_sell_flag and pos['units'] > 1:
-                        sell_qty = math.floor(pos['units'] / 2)
-                        order_res = execute_order(ticker, sell_qty, side="SELL", price=current_price)
-                        sell_signals.append(f"- [{name}] 🎯 1차 5% 익절 ({sell_qty}주) ➞ {order_res['msg']}")
-                        if order_res['success']:
-                            pos['units'] -= sell_qty
-                            pos['half_sold'] = True
-                            pos['stop_loss'] = pos['last_buy_price'] 
-                            
-                    elif current_price <= pos['stop_loss'] or (half_sell_flag and current_price < ma_20):
-                        reason = "🔪 손절/본전컷" if current_price <= pos['last_buy_price'] else "💰 트레일링 스탑 익절"
+                    if ma_20 > pos['stop_loss'] and current_price > ma_20:
+                        pos['stop_loss'] = ma_20 
+                        
+                    if current_price <= pos['stop_loss']:
+                        reason = "🔪 추세이탈 청산" if current_price <= pos['last_buy_price'] else "💰 트레일링 스탑 익절"
                         order_res = execute_order(ticker, pos['units'], side="SELL", price=current_price)
                         sell_signals.append(f"- [{name}] {reason} ({pos['units']}주) ➞ {order_res['msg']}")
                         if order_res['success']:
@@ -403,14 +397,14 @@ if kis_token:
                             del portfolio[ticker] 
 
                 elif ticker not in portfolio:
-                    if rsi_14 <= 35.0:
+                    if rsi_14 <= 35.0: 
                         kr_swing_candidates.append({
                             'ticker': ticker, 'name': name, 'unit_size': unit_size, 'price': current_price,
                             'rsi': rsi_14, 'ma_20': ma_20, 'sector': sector, 'market': 'KR_KOSPI', 'chart_link': chart_link
                         })
 
             # ------------------------------------
-            # 🚀 코스닥 로직 (돌파: MA60, 윗꼬리 40% 완화)
+            # 🚀 코스닥 로직 (돌파)
             # ------------------------------------
             elif is_kr_kosdaq and target_market in ['KR_KOSDAQ', 'ALL']:
                 if current_price < MIN_PRICE_KRW or current_price_krw > MAX_POSITION_KRW: continue
@@ -451,7 +445,7 @@ if kis_token:
                         close_position_ratio = (daily_high - current_price) / (daily_high - daily_low)
                     else: close_position_ratio = 1.0 
                     
-                    if current_price >= recent_20_high and current_price > ma_60 and close_position_ratio <= 0.40:
+                    if current_price >= recent_20_high and current_price > ma_60 and close_position_ratio <= 0.40: 
                         kq_breakout_candidates.append({
                             'ticker': ticker, 'name': name, 'unit_size': unit_size, 'price': current_price,
                             'turnover': turnover_krw, 'N': N, 'sector': sector, 'market': 'KR_KOSDAQ', 'chart_link': chart_link
@@ -476,47 +470,83 @@ if kis_token:
         del portfolio[ghost]
 
     # ==================================================
-    # 🌟 6. 3대장 랭킹 정렬 및 밸런싱 매수 실행
+    # 🌟 6. 3대장 랭킹 정렬 및 💡 스마트 강제 리밸런싱
     # ==================================================
     us_candidates.sort(key=lambda x: x['momentum'], reverse=True)     
-    kr_swing_candidates.sort(key=lambda x: x['rsi'])                  
+    kr_swing_candidates.sort(key=lambda x: x['rsi'])                 
     kq_breakout_candidates.sort(key=lambda x: x['turnover'], reverse=True) 
     
-    kr_all_candidates = kq_breakout_candidates + kr_swing_candidates
-    all_candidates = us_candidates + kr_all_candidates
+    # 👇 [우선순위 변경] 미국장(US) -> 코스닥(돌파) -> 코스피(스윙)
+    all_candidates = us_candidates + kq_breakout_candidates + kr_swing_candidates
     
+    daily_swaps_count = 0  
+
     for cand in all_candidates:
-        if current_positions >= MAX_POSITIONS: 
-            skipped_signals.append(f"- [{cand['name']}] 전체 계좌 꽉참 (보류)")
-            break
+        cand_market = cand['market']
+        cand_strategy = 'KR_SWING' if cand_market == 'KR_KOSPI' else 'KQ_BREAKOUT' if cand_market == 'KR_KOSDAQ' else 'US_TURTLE'
+        
+        is_full = False
+        if current_positions >= MAX_POSITIONS: is_full = True
+        elif cand_market.startswith('KR') and current_kr_positions >= MAX_KR_POSITIONS: is_full = True
+        elif cand_market == 'US' and current_us_positions >= MAX_US_POSITIONS: is_full = True
+        elif current_sector_positions[cand['sector']] >= MAX_SECTOR_POSITIONS: is_full = True
+
+        if is_full:
+            if daily_swaps_count >= MAX_SWAPS_PER_DAY:
+                skipped_signals.append(f"- [{cand['name']}] 하루 강제교체 한도({MAX_SWAPS_PER_DAY}회) 초과로 보류")
+                continue
+                
+            target_holdings = []
+            for t, p in portfolio.items():
+                if p.get('strategy') == cand_strategy:
+                    b_date_str = p.get('buy_date', (kr_time - timedelta(days=10)).strftime('%Y-%m-%d'))
+                    try: b_date = datetime.strptime(b_date_str, '%Y-%m-%d').date()
+                    except: b_date = (kr_time - timedelta(days=10)).date()
+                    
+                    days_held = (kr_time.date() - b_date).days
+                    curr_p = prices_cache.get(t, p['last_buy_price'])
+                    profit = (curr_p - p['last_buy_price']) / p['last_buy_price'] * 100
+                    
+                    if days_held >= MIN_HOLD_DAYS and profit <= SWAP_PROFIT_THRESHOLD:
+                        target_holdings.append((t, p, profit))
             
-        if cand['market'].startswith('KR') and current_kr_positions >= MAX_KR_POSITIONS:
-            skipped_signals.append(f"- [{cand['name']}] 한국장(KR) {MAX_KR_POSITIONS}개 한도 초과 (보류)")
-            continue
+            if not target_holdings:
+                skipped_signals.append(f"- [{cand['name']}] 진입 픽 취소 (최소 보유일 or 손실 허들 방어기제 작동)")
+                continue
+                
+            target_holdings.sort(key=lambda x: x[2])
+            worst_ticker, worst_pos, worst_profit = target_holdings[0]
             
-        if cand['market'] == 'US' and current_us_positions >= MAX_US_POSITIONS:
-            skipped_signals.append(f"- [{cand['name']}] 미국장(US) {MAX_US_POSITIONS}개 한도 초과 (보류)")
-            continue
+            sell_res = execute_order(worst_ticker, worst_pos['units'], side="SELL", price=prices_cache.get(worst_ticker, 0))
+            sell_signals.append(f"- [{worst_pos['name']}] ♻️ 대장주 영입을 위한 컷오프 (수익률 {worst_profit:.1f}%) ➞ {sell_res['msg']}")
             
-        if current_sector_positions[cand['sector']] >= MAX_SECTOR_POSITIONS: 
-            continue
-            
+            if sell_res['success']:
+                daily_swaps_count += 1
+                current_positions -= 1
+                current_sector_positions[get_sector(worst_ticker)] -= 1
+                if cand_strategy in ['KR_SWING', 'KQ_BREAKOUT']: current_kr_positions -= 1
+                else: current_us_positions -= 1
+                del portfolio[worst_ticker]
+            else:
+                skipped_signals.append(f"- [{cand['name']}] 기존 종목 매도 실패로 강제교체 보류")
+                continue 
+                
         order_res = execute_order(cand['ticker'], cand['unit_size'], side="BUY", price=cand['price'])
         
         if cand['market'] == 'KR_KOSPI':
             buy_signals.append(f"- 🥇 [{cand['name']}] 📉 코스피 스윙(RSI: {cand['rsi']:.1f}) ➞ {order_res['msg']} [차트]({cand['chart_link']})")
             if order_res['success']:
-                portfolio[cand['ticker']] = {'name': cand['name'], 'units': cand['unit_size'], 'chunks': 1, 'last_buy_price': cand['price'], 'stop_loss': cand['price'] * 0.95, 'trailing_stop': cand['ma_20'], 'strategy': 'KR_SWING', 'half_sold': False}
+                portfolio[cand['ticker']] = {'name': cand['name'], 'units': cand['unit_size'], 'chunks': 1, 'last_buy_price': cand['price'], 'stop_loss': cand['price'] * 0.95, 'trailing_stop': cand['ma_20'], 'strategy': 'KR_SWING', 'buy_date': kr_time.strftime('%Y-%m-%d')}
                 current_positions += 1; current_sector_positions[cand['sector']] += 1; current_kr_positions += 1
         elif cand['market'] == 'KR_KOSDAQ':
             buy_signals.append(f"- 🥇 [{cand['name']}] 🚀 코스닥 돌파(대장주) ➞ {order_res['msg']} [차트]({cand['chart_link']})")
             if order_res['success']:
-                portfolio[cand['ticker']] = {'name': cand['name'], 'units': cand['unit_size'], 'chunks': 1, 'last_buy_price': cand['price'], 'stop_loss': cand['price'] - (2 * cand['N']), 'trailing_stop': cand['price'] - (2 * cand['N']), 'strategy': 'KQ_BREAKOUT'}
+                portfolio[cand['ticker']] = {'name': cand['name'], 'units': cand['unit_size'], 'chunks': 1, 'last_buy_price': cand['price'], 'stop_loss': cand['price'] - (2 * cand['N']), 'trailing_stop': cand['price'] - (2 * cand['N']), 'strategy': 'KQ_BREAKOUT', 'buy_date': kr_time.strftime('%Y-%m-%d')}
                 current_positions += 1; current_sector_positions[cand['sector']] += 1; current_kr_positions += 1
         else:
             buy_signals.append(f"- 🥇 [{cand['name']}] ✨ 미국장 추세(모멘텀: {cand['momentum']:.2f}) ➞ {order_res['msg']} [차트]({cand['chart_link']})")
             if order_res['success']:
-                portfolio[cand['ticker']] = {'name': cand['name'], 'units': cand['unit_size'], 'chunks': 1, 'last_buy_price': cand['price'], 'stop_loss': cand['price'] - (2 * cand['N']), 'trailing_stop': cand['low_10'], 'strategy': 'US_TURTLE'}
+                portfolio[cand['ticker']] = {'name': cand['name'], 'units': cand['unit_size'], 'chunks': 1, 'last_buy_price': cand['price'], 'stop_loss': cand['price'] - (2 * cand['N']), 'trailing_stop': cand['low_10'], 'strategy': 'US_TURTLE', 'buy_date': kr_time.strftime('%Y-%m-%d')}
                 current_positions += 1; current_sector_positions[cand['sector']] += 1; current_us_positions += 1
 
 # 대시보드 리스트 생성
@@ -556,9 +586,9 @@ else:
             except Exception: time.sleep(5)
                 
         if not response_text: response_text = f"**매수**\n{buy_text}\n\n**청산**\n{sell_text}"
-        final_content = f"🤖 **V15.2 ({market_title})** 🤖\n{response_text}"
+        final_content = f"🤖 **V16.3 우선순위 매스터 ({market_title})** 🤖\n{response_text}"
     else:
-        final_content = f"🤖 **V15.2 ({market_title} 관망)** 🤖\n감시 {len(all_stocks)}개 / 잔고: 한국 {current_kr_positions}/{MAX_KR_POSITIONS}개, 미국 {current_us_positions}/{MAX_US_POSITIONS}개."
+        final_content = f"🤖 **V16.3 우선순위 매스터 ({market_title} 관망)** 🤖\n감시 {len(all_stocks)}개 / 잔고: 한국 {current_kr_positions}/{MAX_KR_POSITIONS}개, 미국 {current_us_positions}/{MAX_US_POSITIONS}개."
 
 if len(final_content) > 1900: final_content = final_content[:1900] + "\n\n... (⚠️ 요약됨)"
 
@@ -569,9 +599,9 @@ except Exception as e:
 
 if SHEET_WEBHOOK_URL:
     kr_time = datetime.now(pytz.timezone('Asia/Seoul')).strftime('%Y-%m-%d %H:%M:%S')
-    buy_count = len([s for s in buy_signals if '신규 진입' in s or '픽' in s or '돌파' in s])
+    buy_count = len([s for s in buy_signals if '신규 진입' in s or '픽' in s or '돌파' in s or '스윙' in s or '추세' in s])
     sell_count = len(sell_signals)
-    summary_msg = f"매수/익절 {buy_count}건, 청산 {sell_count}건" if (buy_count > 0 or sell_count > 0) else "관망 중"
+    summary_msg = f"매수 {buy_count}건, 청산 {sell_count}건" if (buy_count > 0 or sell_count > 0) else "관망 중"
     
     sheet_data = {
         "date": kr_time,
