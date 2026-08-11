@@ -1,5 +1,5 @@
 # ==========================================
-# 🐢 AI 하이브리드 터틀 봇 V15.2 (자본금 50만원 + 모의투자 서버 정상화)
+# 🐢 AI 하이브리드 터틀 봇 V15.2 (실전 자동매매 통합판)
 # ==========================================
 import os
 import yfinance as yf
@@ -28,7 +28,7 @@ if not all([GEMINI_API_KEY, DISCORD_WEBHOOK_URL, KIS_APP_KEY, KIS_APP_SECRET, KI
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-# 👇 [수정 완료] 모의투자 전용 도메인으로 복구 (앱키 충돌 해결)
+# 💡 모의투자 전용 도메인 고정
 KIS_URL = "https://openapivts.koreainvestment.com:29443" 
 
 kr_time = datetime.now(pytz.timezone('Asia/Seoul'))
@@ -54,7 +54,6 @@ def get_kis_token():
 kis_token = get_kis_token()
 print("✅ KIS 토큰 발급 완료!" if kis_token else "❌ KIS 토큰 발급 실패. 임무를 보류합니다.")
 
-# [슬리피지 방어] 지정가 00
 def execute_order(ticker, qty, side="BUY", price=0.0):
     if not kis_token: return {"success": False, "msg": "토큰 없음"}
     time.sleep(0.5) 
@@ -95,23 +94,22 @@ def execute_order(ticker, qty, side="BUY", price=0.0):
     except Exception as e: return {"success": False, "msg": f"❌ 에러({e})"}
 
 # ==========================================
-# 🌟 3. 자본 세팅 (50만원) 및 실잔고 동기화
+# 🌟 3. 자본 세팅 (50만 원) 및 실잔고 동기화
 # ==========================================
-# 👇 50만 원 자금 관리 세팅 적용 완료
 TOTAL_CAPITAL = 500000      
 RISK_PERCENT = 0.02        
 RISK_AMOUNT = TOTAL_CAPITAL * RISK_PERCENT
 
-MIN_TURNOVER_KRW = 5000000000      
-KOSDAQ_MIN_TURNOVER = 3000000000   
+MIN_TURNOVER_KRW = 5000000000      # 코스피 50억
+KOSDAQ_MIN_TURNOVER = 3000000000   # 코스닥 30억
 MIN_MARKET_CAP_KRW = 100000000000 
-MIN_PRICE_KRW = 1000               
+MIN_PRICE_KRW = 1000               # 1000원 이상
 
 MAX_POSITIONS = 4          
 MAX_KR_POSITIONS = 2        
 MAX_US_POSITIONS = 2        
 MAX_SECTOR_POSITIONS = 2       
-MAX_POSITION_KRW = 150000     
+MAX_POSITION_KRW = 150000   # 종목당 최대 15만 원
 
 buy_signals, sell_signals, skipped_signals = [], [], []
 dashboard_list = [] 
@@ -204,10 +202,10 @@ def calculate_rsi(series, period=14):
     return rsi
 
 # ==========================================
-# 🌟 4. [런타임 극비 최적화] 사전 필터링 유니버스
+# 🌟 4. [런타임 최적화] 사전 필터링 유니버스
 # ==========================================
 all_stocks = {}
-print("⏳ 시장 유니버스 사전 필터링 중... (속도 10배 향상 엔진)")
+print("⏳ 시장 유니버스 사전 필터링 중...")
 
 if target_market in ['KR_KOSPI', 'ALL']:
     try:
@@ -262,7 +260,7 @@ for t in portfolio.keys():
     if sec in current_sector_positions: current_sector_positions[sec] += 1
 
 print(f"📊 동기화된 계좌: 한국장 {current_kr_positions}개 / 미국장 {current_us_positions}개")
-print(f"⚡ 사전 필터링 완료! 살아남은 {len(all_stocks)}개 정예 종목 정밀 스캔 시작!")
+print(f"⚡ 사전 필터링 완료! 정예 종목 정밀 스캔 시작!")
 
 # ==========================================
 # 🌟 5. [지능형 랭킹 엔진] 스캔 및 로직
@@ -271,7 +269,6 @@ kr_swing_candidates = []
 kq_breakout_candidates = []   
 us_candidates = []            
 prices_cache = {}
-# 👇 [최적화 적용] 400일로 데이터 경량화
 fdr_start_date = (kr_time - timedelta(days=400)).strftime('%Y-%m-%d')
 scanned_tickers = set()
 
@@ -406,7 +403,7 @@ if kis_token:
                             del portfolio[ticker] 
 
                 elif ticker not in portfolio:
-                    if rsi_14 <= 35.0: # 35 완화 적용
+                    if rsi_14 <= 35.0:
                         kr_swing_candidates.append({
                             'ticker': ticker, 'name': name, 'unit_size': unit_size, 'price': current_price,
                             'rsi': rsi_14, 'ma_20': ma_20, 'sector': sector, 'market': 'KR_KOSPI', 'chart_link': chart_link
@@ -446,7 +443,7 @@ if kis_token:
 
                 elif ticker not in portfolio:
                     recent_20_high = float(stock_data['High'].iloc[-21:-1].max())
-                    ma_60 = float(stock_data['Close'].rolling(window=60).mean().iloc[-1]) # 60일선 완화
+                    ma_60 = float(stock_data['Close'].rolling(window=60).mean().iloc[-1])
                     
                     daily_high = float(stock_data['High'].iloc[-1])
                     daily_low = float(stock_data['Low'].iloc[-1])
@@ -454,7 +451,7 @@ if kis_token:
                         close_position_ratio = (daily_high - current_price) / (daily_high - daily_low)
                     else: close_position_ratio = 1.0 
                     
-                    if current_price >= recent_20_high and current_price > ma_60 and close_position_ratio <= 0.40: # 40% 완화
+                    if current_price >= recent_20_high and current_price > ma_60 and close_position_ratio <= 0.40:
                         kq_breakout_candidates.append({
                             'ticker': ticker, 'name': name, 'unit_size': unit_size, 'price': current_price,
                             'turnover': turnover_krw, 'N': N, 'sector': sector, 'market': 'KR_KOSDAQ', 'chart_link': chart_link
