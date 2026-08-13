@@ -2,8 +2,8 @@ name: 🚀 KOSDAQ Bot
 
 on:
   schedule:
-    # 한국시간 14:50 목표 (약 2시간 10분 지연 감안하여 UTC 03:45 예약)
-    - cron: '45 3 * * *'
+    # 한국시간 15:00 목표 (약 3시간 35분 지연 감안하여 UTC 02:25 예약)
+    - cron: '25 2 * * *'
   workflow_dispatch:
 
 concurrency:
