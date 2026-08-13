@@ -1,5 +1,5 @@
 # ==========================================
-# 🐢 AI 하이브리드 터틀 봇 V16.3 (우선순위 최적화: US -> KOSDAQ -> KOSPI)
+# 🐢 AI 하이브리드 터틀 봇 V16.4 (기억상실 버그 완벽 수정 및 실전 최적화)
 # ==========================================
 import os
 import yfinance as yf
@@ -92,7 +92,7 @@ def execute_order(ticker, qty, side="BUY", price=0.0):
     except Exception as e: return {"success": False, "msg": f"❌ 에러({e})"}
 
 # ==========================================
-# 🌟 3. 자본 세팅 (50만 원) 및 실잔고 동기화
+# 🌟 3. 자본 세팅 및 실잔고 동기화
 # ==========================================
 TOTAL_CAPITAL = 500000      
 RISK_PERCENT = 0.02         
@@ -127,7 +127,9 @@ if SHEET_WEBHOOK_URL:
                 raw_text = res.text.strip()
                 if raw_text and raw_text.startswith('{') and raw_text.endswith('}'):
                     data = json.loads(raw_text)
-                    if isinstance(data, dict): portfolio = data
+                    # 👇 [V16.4 패치 1] 구글 시트에서 전체 JSON이 올 경우 portfolio 키만 정확히 빼냅니다.
+                    if isinstance(data, dict): 
+                        portfolio = data.get('portfolio', data) 
                 db_loaded = True
                 break
             else: time.sleep(5)
@@ -139,43 +141,66 @@ if SHEET_WEBHOOK_URL:
         except: pass
         exit() 
 
+# 👇 [V16.4 패치 2] KIS API 오류 시 침묵의 초기화를 막는 절대 방어 로직 탑재
 def sync_portfolio_with_kis_balance(current_portfolio):
     if not kis_token: return current_portfolio
     clean_account = KIS_ACCOUNT.replace("-", "").strip()
     cano, prdt_cd = clean_account[:8], (clean_account[8:10] if len(clean_account) >= 10 else "01")
     tr_prefix = "V" if "openapivts" in KIS_URL else "T"
     
-    actual_tickers = {} 
+    kr_tickers = {}
+    us_tickers = {}
+    kr_api_success = False
+    us_api_success = False
     headers = {"Content-Type": "application/json; charset=utf-8", "authorization": f"Bearer {kis_token}", "appkey": KIS_APP_KEY, "appsecret": KIS_APP_SECRET}
     
-    try:
+    try: # 한국장 잔고 호출
         headers["tr_id"] = f"{tr_prefix}TTC8434R"
         params = {"CANO": cano, "ACNT_PRDT_CD": prdt_cd, "AFHR_FLPR_YN": "N", "OFL_YN": "", "INQR_DVSN": "01", "UNPR_DVSN": "01", "FUND_STTL_ICLD_YN": "N", "FNCG_AMT_AUTO_RDPT_YN": "N", "PRCS_DVSN": "00", "CTX_AREA_FK100": "", "CTX_AREA_NK100": ""}
         res = requests.get(f"{KIS_URL}/uapi/domestic-stock/v1/trading/inquire-balance", headers=headers, params=params, timeout=10)
-        for item in res.json().get('output1', []):
-            qty = int(item.get('hldg_qty', 0))
-            if qty > 0: actual_tickers[item.get('pdno')] = qty
+        if res.status_code == 200:
+            kr_api_success = True
+            for item in res.json().get('output1', []):
+                qty = int(item.get('hldg_qty', 0))
+                if qty > 0: kr_tickers[item.get('pdno')] = qty
     except: pass
 
-    try:
+    try: # 미국장 잔고 호출
         headers["tr_id"] = f"{tr_prefix}TTS3012R"
         params = {"CANO": cano, "ACNT_PRDT_CD": prdt_cd, "WCRC_FRS_EXCG_CD": "USD", "NATN_CD": "840", "TR_MKET_CD": "00", "INQR_DVSN_CD": "0"}
         res = requests.get(f"{KIS_URL}/uapi/overseas-stock/v1/trading/inquire-present-balance", headers=headers, params=params, timeout=10)
-        for item in res.json().get('output1', []):
-            qty = int(float(item.get('ccld_qty_smtl1', 0)))
-            if qty > 0:
-                sym = item.get('ovrs_pdno', '').replace('.', '-').replace('/', '-')
-                if sym: actual_tickers[sym] = qty
+        if res.status_code == 200:
+            us_api_success = True
+            for item in res.json().get('output1', []):
+                qty = int(float(item.get('ccld_qty_smtl1', 0)))
+                if qty > 0:
+                    sym = item.get('ovrs_pdno', '').replace('.', '-').replace('/', '-')
+                    if sym: us_tickers[sym] = qty
     except: pass
 
     synced_portfolio = {}
     for t, p in current_portfolio.items():
         clean_t = t.split('.')[0]
-        if clean_t in actual_tickers or t in actual_tickers: 
-            actual_qty = actual_tickers.get(clean_t, actual_tickers.get(t, p['units']))
-            p['units'] = actual_qty
-            synced_portfolio[t] = p
-        else: skipped_signals.append(f"- 🔄 [{p['name']}] 장부 불일치 ➞ 실제 계좌 잔고가 없어 DB 동기화 삭제 처리")
+        is_kr = t.endswith('.KS') or t.endswith('.KQ')
+        
+        # API 통신에 성공했을 때만! 장부 불일치 삭제를 허용합니다. (에러 땐 무조건 보존)
+        if is_kr:
+            if not kr_api_success:
+                synced_portfolio[t] = p
+            elif clean_t in kr_tickers or t in kr_tickers:
+                p['units'] = kr_tickers.get(clean_t, kr_tickers.get(t, p['units']))
+                synced_portfolio[t] = p
+            else:
+                skipped_signals.append(f"- 🔄 [{p['name']}] 계좌 잔고 없음 ➞ 장부 동기화 삭제")
+        else:
+            if not us_api_success:
+                synced_portfolio[t] = p
+            elif clean_t in us_tickers or t in us_tickers:
+                p['units'] = us_tickers.get(clean_t, us_tickers.get(t, p['units']))
+                synced_portfolio[t] = p
+            else:
+                skipped_signals.append(f"- 🔄 [{p['name']}] 계좌 잔고 없음 ➞ 장부 동기화 삭제")
+                
     return synced_portfolio
 
 portfolio = sync_portfolio_with_kis_balance(portfolio)
@@ -368,7 +393,7 @@ if kis_token:
                         })
 
             # ------------------------------------
-            # 🇰🇷 코스피 로직 (스윙: 무제한 트레일링 스탑)
+            # 🇰🇷 코스피 로직 (스윙: 무제한 트레일링 스탑 적용 완료)
             # ------------------------------------
             elif is_kr_kospi and target_market in ['KR_KOSPI', 'ALL']:
                 if current_price < MIN_PRICE_KRW or current_price_krw > MAX_POSITION_KRW: continue
@@ -453,21 +478,11 @@ if kis_token:
 
         except Exception: continue
         
-    ghost_tickers = []
+    # 👇 [V16.4 패치 3] 유령 주식 소각 로직 삭제! (네트워크 오류로 인한 장부 삭제 방지)
     for t in list(portfolio.keys()):
         t_mark = 'KR_KOSPI' if t.endswith('.KS') else 'KR_KOSDAQ' if t.endswith('.KQ') else 'US'
         if target_market in ['ALL', t_mark] and t not in scanned_tickers:
-            ghost_tickers.append(t)
-    
-    for ghost in ghost_tickers:
-        g_name = portfolio[ghost]['name']
-        g_sec = get_sector(ghost)
-        g_strat = portfolio[ghost].get('strategy', 'UNKNOWN')
-        skipped_signals.append(f"- 👻 [{g_name}] 데이터 누락 감지 ➞ 장부 임시 소각")
-        current_positions -= 1; current_sector_positions[g_sec] -= 1
-        if g_strat in ['KR_SWING', 'KQ_BREAKOUT']: current_kr_positions -= 1
-        elif g_strat == 'US_TURTLE': current_us_positions -= 1
-        del portfolio[ghost]
+            skipped_signals.append(f"- ⚠️ [{portfolio[t]['name']}] 일시적 데이터 조회 실패 (홀딩 유지)")
 
     # ==================================================
     # 🌟 6. 3대장 랭킹 정렬 및 💡 스마트 강제 리밸런싱
@@ -476,7 +491,7 @@ if kis_token:
     kr_swing_candidates.sort(key=lambda x: x['rsi'])                 
     kq_breakout_candidates.sort(key=lambda x: x['turnover'], reverse=True) 
     
-    # 👇 [우선순위 변경] 미국장(US) -> 코스닥(돌파) -> 코스피(스윙)
+    # [우선순위] 미국장(US) -> 코스닥(돌파) -> 코스피(스윙)
     all_candidates = us_candidates + kq_breakout_candidates + kr_swing_candidates
     
     daily_swaps_count = 0  
@@ -586,9 +601,9 @@ else:
             except Exception: time.sleep(5)
                 
         if not response_text: response_text = f"**매수**\n{buy_text}\n\n**청산**\n{sell_text}"
-        final_content = f"🤖 **V16.3 우선순위 매스터 ({market_title})** 🤖\n{response_text}"
+        final_content = f"🤖 **V16.4 갓모드 ({market_title})** 🤖\n{response_text}"
     else:
-        final_content = f"🤖 **V16.3 우선순위 매스터 ({market_title} 관망)** 🤖\n감시 {len(all_stocks)}개 / 잔고: 한국 {current_kr_positions}/{MAX_KR_POSITIONS}개, 미국 {current_us_positions}/{MAX_US_POSITIONS}개."
+        final_content = f"🤖 **V16.4 갓모드 ({market_title} 관망)** 🤖\n감시 {len(all_stocks)}개 / 잔고: 한국 {current_kr_positions}/{MAX_KR_POSITIONS}개, 미국 {current_us_positions}/{MAX_US_POSITIONS}개."
 
 if len(final_content) > 1900: final_content = final_content[:1900] + "\n\n... (⚠️ 요약됨)"
 
