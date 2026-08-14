@@ -1,5 +1,5 @@
 # ==========================================
-# 🚀 AI 하이브리드 터틀 봇 V35.0 (KRX 차단 우회 + 네이버 API 스캔 패치)
+# 🚀 AI 하이브리드 터틀 봇 V35.0 (안전성 최우선 실전 라이브 모델)
 # ==========================================
 import os
 import yfinance as yf
@@ -12,14 +12,13 @@ import math
 import json 
 from datetime import datetime, timedelta
 import pytz
-import concurrent.futures
 import warnings
 import logging
 
 warnings.filterwarnings('ignore')
 logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 
-# 🌟 1. 환경 변수 로드
+# 🌟 1. 환경 변수 로드 (공백 제거 안전장치 포함)
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
 KIS_APP_KEY = os.environ.get("KIS_APP_KEY", "").strip()
@@ -43,7 +42,7 @@ elif RUN_MARKET == 'US': target_market, market_title = 'US', "🇺🇸 미국장
 else: target_market, market_title = 'ALL', "🌐 통합 트렌드 라이더 모드"
 
 print(f"⏰ 현재 한국시간: {kr_time.strftime('%Y-%m-%d %H:%M:%S')}")
-print(f"🎯 V35.0 봇 가동 (50만 원 세팅 + KRX 차단 우회 패치): {market_title}\n")
+print(f"🎯 V35.0 실전 라이브 가동 (안전성 최우선): {market_title}\n")
 
 # 🌟 2. KIS API 통신 모듈
 def get_kis_token():
@@ -62,7 +61,7 @@ print("✅ KIS 토큰 발급 완료!" if kis_token else "❌ KIS 토큰 발급 �
 
 def execute_order(ticker, qty, side="BUY", price=0.0):
     if not kis_token: return {"success": False, "msg": "토큰 없음"}
-    if qty <= 0: return {"success": False, "msg": "수량 부족(0주)"}
+    if qty <= 0: return {"success": False, "msg": "수량 부족"}
     time.sleep(0.5) 
     
     is_krw = ticker.endswith('.KS') or ticker.endswith('.KQ')
@@ -96,10 +95,10 @@ def execute_order(ticker, qty, side="BUY", price=0.0):
         data = res.json()
         if data.get("rt_cd") == "0": return {"success": True, "msg": "✅ 체결"}
         else: return {"success": False, "msg": f"❌ 거절({data.get('msg1')})"}
-    except Exception as e: return {"success": False, "msg": f"❌ 에러({e})"}
+    except Exception as e: return {"success": False, "msg": f"❌ 통신장애"}
 
 # ==========================================
-# 🌟 3. 50만 원 자본 세팅 및 방어막
+# 🌟 3. 자본 세팅 및 독립 마켓 방어막
 # ==========================================
 TOTAL_CAPITAL = 500000        
 MAX_POSITIONS = 4          
@@ -132,8 +131,10 @@ print(f"   - 🇰🇷 코스피: {'🟢 상승장' if is_kospi_bullish else '�
 print(f"   - 🚀 코스닥: {'🟢 상승장' if is_kosdaq_bullish else '🔴 하락장'}")
 print(f"   - 🇺🇸 미국장: {'🟢 상승장' if is_us_bullish else '🔴 하락장'}\n")
 
+# DB 보호막 (기억상실증 방지)
 db_loaded = False
 if SHEET_WEBHOOK_URL:
+    print("구글 시트(DB)에서 포트폴리오를 불러옵니다...")
     for attempt in range(3):
         try:
             res = requests.get(SHEET_WEBHOOK_URL, timeout=30, allow_redirects=True)
@@ -148,7 +149,7 @@ if SHEET_WEBHOOK_URL:
         except: time.sleep(5)
 
 if not db_loaded:
-    error_msg = f"🚨 **시스템 정지** [{market_title}] 구글 DB 연결 실패. 자산 보호를 위해 봇을 종료합니다."
+    error_msg = f"🚨 **시스템 자동 정지** [{market_title}] 구글 DB 응답 없음. 자산 보호를 위해 종료."
     try: requests.post(DISCORD_WEBHOOK_URL, json={"content": error_msg}, timeout=10)
     except: pass
     exit(1)
@@ -216,111 +217,131 @@ current_kr_positions = sum(1 for p in portfolio.values() if isinstance(p, dict) 
 current_us_positions = sum(1 for p in portfolio.values() if isinstance(p, dict) and p.get('market') == 'US')
 
 # ==========================================
-# 🌟 4. 유니버스 구축 (💡 KRX 차단 우회 네이버 API 적용)
+# 🌟 4. [핵심 패치] 거래대금 사전 필터링 (IP 차단 방지)
 # ==========================================
-tickers_dict = {}
+MIN_TURNOVER_KRW = 10000000000 # 거래대금 100억 이상
+MIN_PRICE_KRW = 1000           # 주가 1000원 이상
 
-def get_naver_top_tickers(market='KOSPI', limit=150):
-    url = f"https://m.stock.naver.com/api/stocks/marketValue/{market}?page=1&pageSize={limit}"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-    try:
-        res = requests.get(url, headers=headers, timeout=10)
-        if res.status_code == 200:
-            return [(item['itemCode'], item['stockName']) for item in res.json().get('stocks', [])]
-    except Exception as e: print(f"⚠️ 네이버 API 조회 에러 ({market}): {e}")
-    return []
+all_stocks = {}
+print("⏳ 시장 유니버스 사전 필터링 중... (거래대금 100억 이상 우량주만 추출)")
 
 if target_market in ['KR_KOSPI', 'ALL']:
-    for code, name in get_naver_top_tickers('KOSPI', 150):
-        tickers_dict[f"{code}.KS"] = ('KR_KOSPI', name, code)
-        
-if target_market in ['KR_KOSDAQ', 'ALL']:
-    for code, name in get_naver_top_tickers('KOSDAQ', 150):
-        tickers_dict[f"{code}.KQ"] = ('KR_KOSDAQ', name, code)
+    try:
+        kr_df = fdr.StockListing('KOSPI')
+        for _, row in kr_df.iterrows(): 
+            try:
+                price = float(row.get('Close', 0))
+                amount = float(row.get('Amount', 0)) 
+                if price < MIN_PRICE_KRW or amount < MIN_TURNOVER_KRW: continue
+                code = str(row.get('Code', row.get('Symbol', ''))).zfill(6) + '.KS'
+                all_stocks[code] = ('KR_KOSPI', str(row.get('Name', '')), code)
+            except: continue
+    except: pass
 
-us_tickers = ['SPLG', 'QQQ', 'SOXX']
-tickers_dict['SPLG'] = ('US', 'SPDR S&P 500 ETF', 'SPLG')
-tickers_dict['QQQ'] = ('US', 'Invesco QQQ Trust', 'QQQ')
-tickers_dict['SOXX'] = ('US', 'iShares Semiconductor ETF', 'SOXX')
+if target_market in ['KR_KOSDAQ', 'ALL']:
+    try:
+        kq_df = fdr.StockListing('KOSDAQ')
+        for _, row in kq_df.iterrows():
+            try:
+                price = float(row.get('Close', 0))
+                amount = float(row.get('Amount', 0))
+                if price < MIN_PRICE_KRW or amount < MIN_TURNOVER_KRW: continue
+                code = str(row.get('Code', row.get('Symbol', ''))).zfill(6) + '.KQ'
+                all_stocks[code] = ('KR_KOSDAQ', str(row.get('Name', '')), code)
+            except: continue
+    except: pass
+
 if target_market in ['US', 'ALL']:
     try:
         us_df = fdr.StockListing('SP500')
         col_sym = 'Symbol' if 'Symbol' in us_df.columns else 'Ticker'
-        for _, row in us_df.iterrows():
-            sym = str(row[col_sym]).replace('.', '-').replace('/', '-')
-            if sym not in ['BRK-B', 'BF-B']: 
-                us_tickers.append(sym)
-                tickers_dict[sym] = ('US', str(row['Name'] if 'Name' in us_df.columns else us_df.columns[1]), sym)
+        col_name = 'Name' if 'Name' in us_df.columns else us_df.columns[1]
+        special_tickers = {'BRKB': 'BRK-B', 'BFB': 'BF-B'}
+        for _, row in us_df.iterrows(): 
+            raw_sym = str(row[col_sym])
+            clean_sym = special_tickers.get(raw_sym, raw_sym.replace('.', '-').replace('/', '-'))
+            all_stocks[clean_sym] = ('US', str(row[col_name]), clean_sym)
+            
+        all_stocks['SPLG'] = ('US', 'SPDR S&P 500 ETF', 'SPLG')
+        all_stocks['QQQ'] = ('US', 'Invesco QQQ Trust', 'QQQ')
+        all_stocks['SOXX'] = ('US', 'iShares Semiconductor ETF', 'SOXX')
     except: pass
 
-data_store = {}
-fdr_start_date = (kr_time - timedelta(days=250)).strftime('%Y-%m-%d')
-fetch_end_date = kr_time.strftime('%Y-%m-%d')
-
-def calc_indicators(df):
-    if df.empty or len(df) < 120: return None
-    df['MA10'] = df['Close'].rolling(10).mean()
-    df['MA20'] = df['Close'].rolling(20).mean()
-    df['MA120'] = df['Close'].rolling(120).mean()
-    delta = df['Close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(2).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(2).mean()
-    rs = gain / loss.replace(0, float('nan'))
-    df['RSI_2'] = (100 - (100 / (1 + rs))).fillna(50)
-    df['Recent20High'] = df['High'].rolling(20).max().shift(1)
-    df.index = df.index.tz_localize(None).normalize()
-    return df.dropna()
-
-print(f"⚡ 데이터 수집 및 지표 계산 중... (대상 종목: {len(tickers_dict)}개)")
-
-def safe_fetch(item):
-    ticker, market, name, code = item
-    for attempt in range(3):
-        try:
-            if market.startswith('KR'): df = fdr.DataReader(code, start=fdr_start_date, end=fetch_end_date)
-            else: df = yf.Ticker(ticker).history(period='1y')
-            if not df.empty and len(df) > 120: return ticker, calc_indicators(df)
-            time.sleep(0.1) 
-        except: time.sleep(0.5)
-    return ticker, None
-
-fetch_items = [(t, v[0], v[1], v[2] if len(v)>2 else t) for t, v in tickers_dict.items()]
-
+# 보유 종목은 스캔 대상에 무조건 포함
 for t in portfolio.keys():
-    if t not in tickers_dict:
+    if t not in all_stocks:
         m = 'KR_KOSPI' if t.endswith('.KS') else 'KR_KOSDAQ' if t.endswith('.KQ') else 'US'
-        c = t.split('.')[0]
-        fetch_items.append((t, m, portfolio[t].get('name', t), c))
+        all_stocks[t] = (m, portfolio[t].get('name', t), t)
 
-if len(fetch_items) == 0:
-    print("🚨 스캔할 종목 리스트가 0개입니다! (네이버 API 통신 실패 의심)")
+print(f"📊 동기화된 계좌: 한국장 {current_kr_positions}개 / 미국장 {current_us_positions}개")
+print(f"⚡ 사전 필터링 완료! 총 {len(all_stocks)}개 정예 종목에 대해 안전한 순차 스캔 시작!")
 
-with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor: 
-    results = list(executor.map(safe_fetch, fetch_items))
-    for ticker, df in results:
-        if df is not None: data_store[ticker] = df
-
+# ==========================================
+# 🌟 5. [핵심 패치] 안전한 순차 데이터 수집 (Sequential Safe Fetch)
+# ==========================================
+data_store = {}
 prices_cache = {}
+fdr_start_date = (kr_time - timedelta(days=250)).strftime('%Y-%m-%d')
+
+for ticker, (market, name, code) in all_stocks.items():
+    try:
+        stock_data = pd.DataFrame()
+        if market.startswith('KR'):
+            for attempt in range(3):
+                temp_data = fdr.DataReader(code.split('.')[0], start=fdr_start_date)
+                if not temp_data.empty and len(temp_data) > 120:
+                    stock_data = temp_data
+                    break
+                time.sleep(0.05) # 무분별한 요청 방어 (KRX 차단 방지)
+        else:
+            ticker_obj = yf.Ticker(ticker)
+            for attempt in range(3):
+                temp_data = ticker_obj.history(period='1y')
+                if not temp_data.empty and len(temp_data) > 120:
+                    stock_data = temp_data
+                    break
+                time.sleep(0.1) # Yahoo 차단 방지
+
+        if stock_data.empty or len(stock_data) < 120: continue 
+
+        # 지표 계산
+        stock_data['MA10'] = stock_data['Close'].rolling(10).mean()
+        stock_data['MA20'] = stock_data['Close'].rolling(20).mean()
+        stock_data['MA120'] = stock_data['Close'].rolling(120).mean()
+        delta = stock_data['Close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(2).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(2).mean()
+        rs = gain / loss.replace(0, float('nan'))
+        stock_data['RSI_2'] = (100 - (100 / (1 + rs))).fillna(50)
+        stock_data['Recent20High'] = stock_data['High'].rolling(20).max().shift(1)
+        
+        data_store[ticker] = stock_data.dropna()
+        prices_cache[ticker] = float(stock_data['Close'].iloc[-1])
+        
+    except Exception as e:
+        continue # 에러 발생 시 조용히 다음 종목으로 넘어감 (봇 생존)
+
+print(f"✅ 정밀 스캔 및 지표 계산 완료! (총 {len(data_store)}개 종목 분석 성공)")
+
+# ==========================================
+# 🌟 6. V35.0 매매 로직 심사 및 집행 
+# ==========================================
 kr_candidates, us_candidates = [], []
 
-# ==========================================
-# 🌟 5. 매매 심사 및 집행 
-# ==========================================
 if kis_token:
     for ticker, df in data_store.items():
-        market = tickers_dict.get(ticker, (portfolio.get(ticker, {}).get('market', 'US')))[0]
-        name = tickers_dict.get(ticker, (portfolio.get(ticker, {}).get('name', ticker)))[1] if ticker in tickers_dict else portfolio.get(ticker, {}).get('name', ticker)
-        
+        market, name, _ = all_stocks[ticker]
         curr_price = float(df['Close'].iloc[-1])
-        prices_cache[ticker] = curr_price
         is_kr = market.startswith('KR')
         krw_price = curr_price if is_kr else curr_price * 1350.0
 
+        # [A] 매도 로직 (고정 손절 + 추세 익절 + 타임스탑)
         if ticker in portfolio:
             pos = portfolio[ticker]
             sell_reason = None
             buy_price = float(pos.get('buy_price', 0))
             if buy_price <= 0: buy_price = curr_price
+            
             buy_dt = datetime.strptime(pos.get('buy_date', kr_time.strftime('%Y-%m-%d')), '%Y-%m-%d')
             days_held = (kr_time.date() - buy_dt.date()).days
             
@@ -346,6 +367,7 @@ if kis_token:
                     else: current_us_positions -= 1
                     del portfolio[ticker] 
 
+        # [B] 매수 후보 스캔
         elif ticker not in portfolio:
             if krw_price > POSITION_SIZE_KRW: continue
             unit_size = math.floor(POSITION_SIZE_KRW / krw_price)
@@ -365,6 +387,7 @@ if kis_token:
                 if curr_price > ma_120 and rsi_2 < 10.0:
                     kr_candidates.append({'ticker': ticker, 'name': name, 'market': market, 'price': curr_price, 'units': unit_size, 'score': rsi_2})
 
+    # [C] 랭킹 정렬 및 집행
     us_candidates.sort(key=lambda x: x['score'], reverse=True)
     kr_candidates.sort(key=lambda x: x['score'])
     
@@ -393,7 +416,7 @@ for ticker, pos in portfolio.items():
     dashboard_list.append({"name": pos.get('name', ticker), "units": pos.get('units', 0), "current_price": round(cp, 2), "buy_price": round(pos.get('buy_price', 0), 2)})
 
 # ==========================================
-# 🌟 6. 디스코드 브리핑 및 구글 DB 저장 (💡 결함 패치: 오류 내역 명시)
+# 🌟 7. 디스코드 브리핑 및 구글 DB 저장 
 # ==========================================
 b_sigs = [s for s in buy_signals if '줍기' in s or '돌파' in s or '패닉' in s]
 buy_text = '\n'.join(b_sigs[:10]) if b_sigs else '신호 없음'
@@ -411,18 +434,16 @@ else:
                 break 
             except: time.sleep(5)
         if not response_text: response_text = f"**매수**\n{buy_text}\n\n**청산**\n{sell_text}"
-        final_content = f"🤖 **V35.0 (KRX 우회 패치 완료) ({market_title})** 🤖\n{response_text}"
+        final_content = f"🤖 **V35.0 (안전성 패치 완료) ({market_title})** 🤖\n{response_text}"
     else:
-        final_content = f"🤖 **V35.0 (KRX 우회 완료) ({market_title} 관망)** 🤖\n방어막 관망 중 / 스캔 종목: {len(data_store)}개 / 잔고: {len(portfolio)}개."
+        final_content = f"🤖 **V35.0 (안전성 완료) ({market_title} 관망)** 🤖\n방어막 및 관망 중 / 정예 스캔: {len(data_store)}개 / 잔고: {len(portfolio)}개."
 
-print("\n📡 디스코드 알림 발송 시도 중...")
 try: 
-    req = requests.post(DISCORD_WEBHOOK_URL, json={"content": final_content[:1900]}, timeout=10)
-    if req.status_code not in [200, 204]: print(f"⚠️ 디스코드 발송 실패 (HTTP {req.status_code}): {req.text}")
-    else: print("✅ 디스코드 알림 발송 성공!")
-except Exception as e: print(f"🚨 디스코드 통신 완전 실패: {e}")
+    print("📡 디스코드 알림 발송 중...")
+    requests.post(DISCORD_WEBHOOK_URL, json={"content": final_content[:1900]}, timeout=10)
+except Exception as e: print(f"🚨 디스코드 통신 에러: {e}")
 
 if SHEET_WEBHOOK_URL:
     sheet_data = {"date": kr_time.strftime('%Y-%m-%d %H:%M:%S'), "message": f"[{market_title}] 진입 {len(b_sigs)}건, 청산 {len(sell_signals)}건", "dashboard": dashboard_list, "portfolio": portfolio}
     try: requests.post(SHEET_WEBHOOK_URL, json=sheet_data, timeout=30)
-    except Exception as e: print(f"🚨 구글 시트 통신 실패: {e}")
+    except Exception as e: print(f"🚨 구글 시트 통신 에러: {e}")
