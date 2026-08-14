@@ -1,5 +1,5 @@
 # ==========================================
-# 🚀 AI 하이브리드 터틀 봇 V35.0 (에러 투명성 및 통신 강화 패치)
+# 🚀 AI 하이브리드 터틀 봇 V35.0 (잔고 인식 오류 완벽 패치)
 # ==========================================
 import os
 import yfinance as yf
@@ -50,7 +50,7 @@ def get_kis_token():
         res = requests.post(url, headers=headers, data=json.dumps(body), timeout=10)
         return res.json().get("access_token") if res.status_code == 200 else None
     except Exception as e: 
-        print(f"⚠️ KIS 토큰 발급 에러 (증권사 서버 접속불가 의심): {e}")
+        print(f"⚠️ 토큰 발급 에러: {e}")
         return None
 
 kis_token = get_kis_token()
@@ -149,7 +149,7 @@ if not db_loaded:
     except: pass
     exit(1)
 
-# 실계좌 우선주의 동기화 (Absolute Sync)
+# 💡 [핵심 패치] KIS 잔고 Absolute Sync (이중 검증)
 def sync_portfolio_with_kis_balance(current_portfolio):
     if not kis_token: return current_portfolio
     clean_account = KIS_ACCOUNT.replace("-", "")
@@ -160,38 +160,57 @@ def sync_portfolio_with_kis_balance(current_portfolio):
     kr_api_success, us_api_success = False, False 
     headers = {"Content-Type": "application/json; charset=utf-8", "authorization": f"Bearer {kis_token}", "appkey": KIS_APP_KEY, "appsecret": KIS_APP_SECRET}
     
+    # 1. 한국장 잔고 조회
     try: 
         headers["tr_id"] = f"{tr_prefix}TTC8434R"
         params = {"CANO": cano, "ACNT_PRDT_CD": prdt_cd, "AFHR_FLPR_YN": "N", "OFL_YN": "", "INQR_DVSN": "01", "UNPR_DVSN": "01", "FUND_STTL_ICLD_YN": "N", "FNCG_AMT_AUTO_RDPT_YN": "N", "PRCS_DVSN": "00", "CTX_AREA_FK100": "", "CTX_AREA_NK100": ""}
         res = requests.get(f"{KIS_URL}/uapi/domestic-stock/v1/trading/inquire-balance", headers=headers, params=params, timeout=10)
-        if res.status_code == 200:
+        data = res.json()
+        if res.status_code == 200 and data.get('rt_cd') == '0': # 완벽한 성공 검증
             kr_api_success = True
-            for item in res.json().get('output1', []):
+            for item in data.get('output1', []):
                 qty = int(item.get('hldg_qty', 0))
                 if qty > 0: kr_tickers[item.get('pdno')] = {'qty': qty, 'avg_price': float(item.get('pchs_avg_pric', 0))}
-    except: pass
+        else: print(f"⚠️ 한국장 잔고 API 실패: {data.get('msg1')}")
+    except Exception as e: print(f"🚨 한국장 통신 에러: {e}")
 
+    # 2. 미국장 잔고 조회 (파라미터 완전 교정)
     try: 
         headers["tr_id"] = f"{tr_prefix}TTS3012R"
-        params = {"CANO": cano, "ACNT_PRDT_CD": prdt_cd, "WCRC_FRS_EXCG_CD": "USD", "NATN_CD": "840", "TR_MKET_CD": "00", "INQR_DVSN_CD": "0"}
+        params = {
+            "CANO": cano, 
+            "ACNT_PRDT_CD": prdt_cd, 
+            "WCRC_FRCR_DVSN_CD": "02", # 01: 원화, 02: 외화 (기존 오타 교정)
+            "NATN_CD": "840",          # 840: 미국
+            "TR_MKET_CD": "00",        # 00: 전체
+            "INQR_DVSN_CD": "00"       # 00: 전체
+        }
         res = requests.get(f"{KIS_URL}/uapi/overseas-stock/v1/trading/inquire-present-balance", headers=headers, params=params, timeout=10)
-        if res.status_code == 200:
+        data = res.json()
+        if res.status_code == 200 and data.get('rt_cd') == '0': # 완벽한 성공 검증
             us_api_success = True
-            for item in res.json().get('output1', []):
-                qty = int(float(item.get('ccld_qty_smtl1', 0)))
+            for item in data.get('output1', []):
+                # 모의투자 버그 대비 듀얼 수량 추적
+                q1 = float(item.get('ccld_qty_smtl1', 0))
+                q2 = float(item.get('cblc_qty13', 0))
+                qty = int(max(q1, q2)) 
+                
                 if qty > 0:
                     sym = item.get('ovrs_pdno', '').replace('.', '-').replace('/', '-')
                     if sym: us_tickers[sym] = {'qty': qty, 'avg_price': float(item.get('pchs_avg_pric', 0))}
-    except: pass
+        else: print(f"⚠️ 미국장 잔고 API 실패: {data.get('msg1')}")
+    except Exception as e: print(f"🚨 미국장 통신 에러: {e}")
 
     synced = {}
     today_str = kr_time.strftime('%Y-%m-%d')
+    
+    # 3. 장부(구글시트)와 실계좌 크로스 체크
     for t, p in current_portfolio.items():
         if not isinstance(p, dict): continue 
         clean_t = t.split('.')[0]
         is_kr = t.endswith('.KS') or t.endswith('.KQ')
         if is_kr:
-            if not kr_api_success: synced[t] = p 
+            if not kr_api_success: synced[t] = p # 에러 시 장부 무조건 보존!
             elif clean_t in kr_tickers or t in kr_tickers:
                 match_k = clean_t if clean_t in kr_tickers else t
                 p['units'] = kr_tickers[match_k]['qty']
@@ -199,7 +218,7 @@ def sync_portfolio_with_kis_balance(current_portfolio):
                 synced[t] = p
                 del kr_tickers[match_k] 
         else:
-            if not us_api_success: synced[t] = p 
+            if not us_api_success: synced[t] = p # 에러 시 장부 무조건 보존!
             elif clean_t in us_tickers or t in us_tickers:
                 match_k = clean_t if clean_t in us_tickers else t
                 p['units'] = us_tickers[match_k]['qty']
@@ -207,11 +226,14 @@ def sync_portfolio_with_kis_balance(current_portfolio):
                 synced[t] = p
                 del us_tickers[match_k] 
 
+    # 4. 미아 종목(앱에는 있고 시트에는 없는 종목) 강제 구출
     if us_api_success:
         for sym, data in us_tickers.items():
+            print(f"📥 수동/누락된 미국 주식 봇에 강제 편입: {sym} ({data['qty']}주)")
             synced[sym] = {'name': sym, 'units': data['qty'], 'buy_price': data['avg_price'], 'market': 'US', 'buy_date': today_str}
     if kr_api_success:
         for code, data in kr_tickers.items():
+            print(f"📥 수동/누락된 한국 주식 봇에 강제 편입: {code} ({data['qty']}주)")
             synced[f"{code}.KS"] = {'name': code, 'units': data['qty'], 'buy_price': data['avg_price'], 'market': 'KR_KOSPI', 'buy_date': today_str}
     return synced
 
@@ -233,9 +255,7 @@ if target_market in ['KR_KOSPI', 'ALL']:
         kr_df = fdr.StockListing('KOSPI')
         for _, row in kr_df.iterrows(): 
             try:
-                price = float(row.get('Close', 0))
-                amount = float(row.get('Amount', 0)) 
-                if price < MIN_PRICE_KRW or amount < MIN_TURNOVER_KRW: continue
+                if float(row.get('Close', 0)) < MIN_PRICE_KRW or float(row.get('Amount', 0)) < MIN_TURNOVER_KRW: continue
                 code = str(row.get('Code', row.get('Symbol', ''))).zfill(6) + '.KS'
                 all_stocks[code] = ('KR_KOSPI', str(row.get('Name', '')), code)
             except: continue
@@ -246,9 +266,7 @@ if target_market in ['KR_KOSDAQ', 'ALL']:
         kq_df = fdr.StockListing('KOSDAQ')
         for _, row in kq_df.iterrows():
             try:
-                price = float(row.get('Close', 0))
-                amount = float(row.get('Amount', 0))
-                if price < MIN_PRICE_KRW or amount < MIN_TURNOVER_KRW: continue
+                if float(row.get('Close', 0)) < MIN_PRICE_KRW or float(row.get('Amount', 0)) < MIN_TURNOVER_KRW: continue
                 code = str(row.get('Code', row.get('Symbol', ''))).zfill(6) + '.KQ'
                 all_stocks[code] = ('KR_KOSDAQ', str(row.get('Name', '')), code)
             except: continue
@@ -279,12 +297,11 @@ for t in portfolio.keys():
 print(f"⚡ 사전 필터링 완료! 총 {len(all_stocks)}개 정예 종목에 대해 안전한 순차 스캔 시작!")
 
 # ==========================================
-# 🌟 5. 순차 데이터 수집 및 매매 심사 (💡 핵심: 투명성 패치 적용)
+# 🌟 5. 순차 데이터 수집 및 매매 심사
 # ==========================================
 data_store, prices_cache = {}, {}
 fdr_start_date = (kr_time - timedelta(days=250)).strftime('%Y-%m-%d')
-
-error_count = 0 # 에러 횟수 추적기
+error_count = 0
 
 for ticker, (market, name, code) in all_stocks.items():
     try:
@@ -296,10 +313,8 @@ for ticker, (market, name, code) in all_stocks.items():
                     if not temp_data.empty and len(temp_data) > 120:
                         stock_data = temp_data
                         break
-                except Exception as api_err:
-                    if attempt == 2: # 마지막 재시도까지 실패하면 비명 지르기
-                        print(f"⚠️ [{name}] 데이터 다운로드 실패 (IP 차단 의심): {api_err}")
-                        error_count += 1
+                except: 
+                    if attempt == 2: error_count += 1
                 time.sleep(0.05) 
         else:
             ticker_obj = yf.Ticker(ticker)
@@ -309,10 +324,8 @@ for ticker, (market, name, code) in all_stocks.items():
                     if not temp_data.empty and len(temp_data) > 120:
                         stock_data = temp_data
                         break
-                except Exception as api_err:
-                    if attempt == 2:
-                        print(f"⚠️ [{name}] Yahoo 데이터 다운로드 실패: {api_err}")
-                        error_count += 1
+                except:
+                    if attempt == 2: error_count += 1
                 time.sleep(0.1) 
 
         if stock_data.empty or len(stock_data) < 120: continue 
@@ -328,9 +341,7 @@ for ticker, (market, name, code) in all_stocks.items():
         
         data_store[ticker] = stock_data.dropna()
         prices_cache[ticker] = float(stock_data['Close'].iloc[-1])
-    except Exception as e: 
-        print(f"🚨 [{name}] 심각한 연산 오류 발생: {e}")
-        continue
+    except: continue
 
 print(f"✅ 정밀 스캔 완료! (성공: {len(data_store)}개 / 실패: {error_count}개)")
 
@@ -469,10 +480,20 @@ else:
 final_content = "\n".join(msg_lines)
 if len(final_content) > 1900: final_content = final_content[:1850] + "\n\n... (글자수 제한으로 이하 생략)"
 
-try: requests.post(DISCORD_WEBHOOK_URL, json={"content": final_content}, timeout=10)
+print("\n📡 디스코드 알림 발송 시도 중...")
+try: 
+    req = requests.post(DISCORD_WEBHOOK_URL, json={"content": final_content}, timeout=10)
+    if req.status_code in [200, 204]: print("✅ 디스코드 알림 발송 성공!")
+    else: print(f"⚠️ 디스코드 발송 실패 (HTTP {req.status_code})")
 except Exception as e: print(f"🚨 디스코드 통신 에러: {e}")
 
+print("📡 구글 시트 데이터 전송 시도 중...")
 if SHEET_WEBHOOK_URL:
     sheet_data = {"date": kr_time.strftime('%Y-%m-%d %H:%M:%S'), "message": f"진입 {len(buy_signals)}건, 청산 {len(sell_signals)}건", "dashboard": dashboard_list, "portfolio": portfolio}
-    try: requests.post(SHEET_WEBHOOK_URL, json=sheet_data, timeout=30)
+    try: 
+        req = requests.post(SHEET_WEBHOOK_URL, json=sheet_data, timeout=30)
+        if req.status_code == 200: print("✅ 구글 시트 데이터 전송 성공!")
+        else: print(f"⚠️ 구글 시트 전송 실패 (HTTP {req.status_code})")
     except Exception as e: print(f"🚨 구글 시트 통신 에러: {e}")
+
+print("🏁 봇 실행이 모두 완료되었습니다. (Exit Code 0)")
