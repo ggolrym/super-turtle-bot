@@ -107,9 +107,9 @@ MAX_KR_POSITIONS = 2
 MAX_US_POSITIONS = 2        
 POSITION_SIZE_KRW = TOTAL_CAPITAL * 0.25  
 
-FIXED_STOP_LOSS_KR = 0.06  
+FIXED_STOP_LOSS_KR = 0.08  
 FIXED_STOP_LOSS_US = 0.08  
-MAX_HOLD_DAYS = 20         
+MAX_HOLD_DAYS = 25         
 
 buy_signals, sell_signals, skipped_signals = [], [], []
 dashboard_list = [] 
