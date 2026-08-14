@@ -1,5 +1,5 @@
 # ==========================================
-# 🚀 AI 하이브리드 터틀 봇 V35.0 (V21.0 안정성 모듈 이식 완료)
+# 🚀 AI 하이브리드 터틀 봇 V35.0 (KRX 차단 우회 + 네이버 API 스캔 패치)
 # ==========================================
 import os
 import yfinance as yf
@@ -43,7 +43,7 @@ elif RUN_MARKET == 'US': target_market, market_title = 'US', "🇺🇸 미국장
 else: target_market, market_title = 'ALL', "🌐 통합 트렌드 라이더 모드"
 
 print(f"⏰ 현재 한국시간: {kr_time.strftime('%Y-%m-%d %H:%M:%S')}")
-print(f"🎯 V35.0 무결점 봇 가동 (50만 원 세팅 + V21.0 안정성): {market_title}\n")
+print(f"🎯 V35.0 봇 가동 (50만 원 세팅 + KRX 차단 우회 패치): {market_title}\n")
 
 # 🌟 2. KIS API 통신 모듈
 def get_kis_token():
@@ -99,7 +99,7 @@ def execute_order(ticker, qty, side="BUY", price=0.0):
     except Exception as e: return {"success": False, "msg": f"❌ 에러({e})"}
 
 # ==========================================
-# 🌟 3. 50만 원 자본 세팅 및 V21.0 DB 연동
+# 🌟 3. 50만 원 자본 세팅 및 방어막
 # ==========================================
 TOTAL_CAPITAL = 500000        
 MAX_POSITIONS = 4          
@@ -132,7 +132,6 @@ print(f"   - 🇰🇷 코스피: {'🟢 상승장' if is_kospi_bullish else '�
 print(f"   - 🚀 코스닥: {'🟢 상승장' if is_kosdaq_bullish else '🔴 하락장'}")
 print(f"   - 🇺🇸 미국장: {'🟢 상승장' if is_us_bullish else '🔴 하락장'}\n")
 
-# 💡 [V21.0 이식] DB 로딩 보호막
 db_loaded = False
 if SHEET_WEBHOOK_URL:
     for attempt in range(3):
@@ -149,12 +148,11 @@ if SHEET_WEBHOOK_URL:
         except: time.sleep(5)
 
 if not db_loaded:
-    error_msg = f"🚨 **시스템 자동 정지** [{market_title}] 구글 DB 응답이 없어 자산 보호를 위해 봇을 종료합니다."
+    error_msg = f"🚨 **시스템 정지** [{market_title}] 구글 DB 연결 실패. 자산 보호를 위해 봇을 종료합니다."
     try: requests.post(DISCORD_WEBHOOK_URL, json={"content": error_msg}, timeout=10)
     except: pass
     exit(1)
 
-# 💡 [V21.0 이식] KIS 통신 실패 시 장부 보호막
 def sync_portfolio_with_kis_balance(current_portfolio):
     if not kis_token: return current_portfolio
     clean_account = KIS_ACCOUNT.replace("-", "")
@@ -162,7 +160,7 @@ def sync_portfolio_with_kis_balance(current_portfolio):
     tr_prefix = "V" if "openapivts" in KIS_URL else "T"
     
     kr_tickers, us_tickers = {}, {}
-    kr_api_success, us_api_success = False, False # 보호 플래그
+    kr_api_success, us_api_success = False, False 
     headers = {"Content-Type": "application/json; charset=utf-8", "authorization": f"Bearer {kis_token}", "appkey": KIS_APP_KEY, "appsecret": KIS_APP_SECRET}
     
     try: 
@@ -200,13 +198,13 @@ def sync_portfolio_with_kis_balance(current_portfolio):
         
         is_kr = t.endswith('.KS') or t.endswith('.KQ')
         if is_kr:
-            if not kr_api_success: synced[t] = p # 통신 실패 시 장부 유지
+            if not kr_api_success: synced[t] = p 
             elif clean_t in kr_tickers or t in kr_tickers:
                 p['units'] = kr_tickers.get(clean_t, kr_tickers.get(t, p['units']))
                 synced[t] = p
             else: skipped_signals.append(f"- 🔄 [{p.get('name', t)}] 잔고 없음 ➞ 장부 삭제")
         else:
-            if not us_api_success: synced[t] = p # 통신 실패 시 장부 유지
+            if not us_api_success: synced[t] = p 
             elif clean_t in us_tickers or t in us_tickers:
                 p['units'] = us_tickers.get(clean_t, us_tickers.get(t, p['units']))
                 synced[t] = p
@@ -218,23 +216,27 @@ current_kr_positions = sum(1 for p in portfolio.values() if isinstance(p, dict) 
 current_us_positions = sum(1 for p in portfolio.values() if isinstance(p, dict) and p.get('market') == 'US')
 
 # ==========================================
-# 🌟 4. 유니버스 구축 및 V21.0 안정형 스캔
+# 🌟 4. 유니버스 구축 (💡 KRX 차단 우회 네이버 API 적용)
 # ==========================================
 tickers_dict = {}
 
-if target_market in ['KR_KOSPI', 'ALL']:
+def get_naver_top_tickers(market='KOSPI', limit=150):
+    url = f"https://m.stock.naver.com/api/stocks/marketValue/{market}?page=1&pageSize={limit}"
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     try:
-        kospi_df = fdr.StockListing('KOSPI')
-        if not kospi_df.empty:
-            for _, row in kospi_df.head(150).iterrows(): tickers_dict[str(row['Code']).zfill(6) + '.KS'] = ('KR_KOSPI', row['Name'], str(row['Code']).zfill(6))
-    except Exception as e: print(f"⚠️ KOSPI 로드 에러: {e}")
+        res = requests.get(url, headers=headers, timeout=10)
+        if res.status_code == 200:
+            return [(item['itemCode'], item['stockName']) for item in res.json().get('stocks', [])]
+    except Exception as e: print(f"⚠️ 네이버 API 조회 에러 ({market}): {e}")
+    return []
 
+if target_market in ['KR_KOSPI', 'ALL']:
+    for code, name in get_naver_top_tickers('KOSPI', 150):
+        tickers_dict[f"{code}.KS"] = ('KR_KOSPI', name, code)
+        
 if target_market in ['KR_KOSDAQ', 'ALL']:
-    try:
-        kosdaq_df = fdr.StockListing('KOSDAQ')
-        if not kosdaq_df.empty:
-            for _, row in kosdaq_df.head(150).iterrows(): tickers_dict[str(row['Code']).zfill(6) + '.KQ'] = ('KR_KOSDAQ', row['Name'], str(row['Code']).zfill(6))
-    except Exception as e: print(f"⚠️ KOSDAQ 로드 에러: {e}")
+    for code, name in get_naver_top_tickers('KOSDAQ', 150):
+        tickers_dict[f"{code}.KQ"] = ('KR_KOSDAQ', name, code)
 
 us_tickers = ['SPLG', 'QQQ', 'SOXX']
 tickers_dict['SPLG'] = ('US', 'SPDR S&P 500 ETF', 'SPLG')
@@ -269,32 +271,31 @@ def calc_indicators(df):
     df.index = df.index.tz_localize(None).normalize()
     return df.dropna()
 
-print(f"⚡ 데이터 수집 및 지표 계산 중... (IP 차단 방지를 위한 안전 모드)")
+print(f"⚡ 데이터 수집 및 지표 계산 중... (대상 종목: {len(tickers_dict)}개)")
 
-# 💡 [V21.0 이식] 단일 병렬 풀을 사용하되 재시도 및 딜레이 적용
 def safe_fetch(item):
-    ticker, market, name = item
+    ticker, market, name, code = item
     for attempt in range(3):
         try:
-            if market.startswith('KR'):
-                df = fdr.DataReader(ticker.split('.')[0], start=fdr_start_date, end=fetch_end_date)
-            else:
-                df = yf.Ticker(ticker).history(period='1y')
-            if not df.empty and len(df) > 120:
-                return ticker, calc_indicators(df)
-            time.sleep(0.1) # IP 차단 방지
+            if market.startswith('KR'): df = fdr.DataReader(code, start=fdr_start_date, end=fetch_end_date)
+            else: df = yf.Ticker(ticker).history(period='1y')
+            if not df.empty and len(df) > 120: return ticker, calc_indicators(df)
+            time.sleep(0.1) 
         except: time.sleep(0.5)
     return ticker, None
 
-fetch_items = [(t, v[0], v[1]) for t, v in tickers_dict.items()]
+fetch_items = [(t, v[0], v[1], v[2] if len(v)>2 else t) for t, v in tickers_dict.items()]
 
-# 포트폴리오 종목 강제 추가 스캔
 for t in portfolio.keys():
     if t not in tickers_dict:
         m = 'KR_KOSPI' if t.endswith('.KS') else 'KR_KOSDAQ' if t.endswith('.KQ') else 'US'
-        fetch_items.append((t, m, portfolio[t].get('name', t)))
+        c = t.split('.')[0]
+        fetch_items.append((t, m, portfolio[t].get('name', t), c))
 
-with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor: # 워커 수 축소로 안정성 도모
+if len(fetch_items) == 0:
+    print("🚨 스캔할 종목 리스트가 0개입니다! (네이버 API 통신 실패 의심)")
+
+with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor: 
     results = list(executor.map(safe_fetch, fetch_items))
     for ticker, df in results:
         if df is not None: data_store[ticker] = df
@@ -392,7 +393,7 @@ for ticker, pos in portfolio.items():
     dashboard_list.append({"name": pos.get('name', ticker), "units": pos.get('units', 0), "current_price": round(cp, 2), "buy_price": round(pos.get('buy_price', 0), 2)})
 
 # ==========================================
-# 🌟 6. 디스코드 브리핑 및 구글 DB 저장 
+# 🌟 6. 디스코드 브리핑 및 구글 DB 저장 (💡 결함 패치: 오류 내역 명시)
 # ==========================================
 b_sigs = [s for s in buy_signals if '줍기' in s or '돌파' in s or '패닉' in s]
 buy_text = '\n'.join(b_sigs[:10]) if b_sigs else '신호 없음'
@@ -410,14 +411,18 @@ else:
                 break 
             except: time.sleep(5)
         if not response_text: response_text = f"**매수**\n{buy_text}\n\n**청산**\n{sell_text}"
-        final_content = f"🤖 **V35.0 안정성 패치 ({market_title})** 🤖\n{response_text}"
+        final_content = f"🤖 **V35.0 (KRX 우회 패치 완료) ({market_title})** 🤖\n{response_text}"
     else:
-        final_content = f"🤖 **V35.0 안정성 패치 ({market_title} 관망)** 🤖\n방어막 및 보유 종목 관망 중 / 잔고: 한국 {current_kr_positions}개, 미국 {current_us_positions}개."
+        final_content = f"🤖 **V35.0 (KRX 우회 완료) ({market_title} 관망)** 🤖\n방어막 관망 중 / 스캔 종목: {len(data_store)}개 / 잔고: {len(portfolio)}개."
 
-try: requests.post(DISCORD_WEBHOOK_URL, json={"content": final_content[:1900]}, timeout=10)
-except Exception as e: print(f"🚨 디스코드 통신 에러: {e}")
+print("\n📡 디스코드 알림 발송 시도 중...")
+try: 
+    req = requests.post(DISCORD_WEBHOOK_URL, json={"content": final_content[:1900]}, timeout=10)
+    if req.status_code not in [200, 204]: print(f"⚠️ 디스코드 발송 실패 (HTTP {req.status_code}): {req.text}")
+    else: print("✅ 디스코드 알림 발송 성공!")
+except Exception as e: print(f"🚨 디스코드 통신 완전 실패: {e}")
 
 if SHEET_WEBHOOK_URL:
     sheet_data = {"date": kr_time.strftime('%Y-%m-%d %H:%M:%S'), "message": f"[{market_title}] 진입 {len(b_sigs)}건, 청산 {len(sell_signals)}건", "dashboard": dashboard_list, "portfolio": portfolio}
     try: requests.post(SHEET_WEBHOOK_URL, json=sheet_data, timeout=30)
-    except Exception as e: print(f"🚨 구글 시트 통신 에러: {e}")
+    except Exception as e: print(f"🚨 구글 시트 통신 실패: {e}")
