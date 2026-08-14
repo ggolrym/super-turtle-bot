@@ -1,5 +1,5 @@
 # ==========================================
-# 🚀 AI 하이브리드 터틀 봇 V35.0 (고속 병렬 최적화 라이브)
+# 🚀 AI 하이브리드 터틀 봇 V35.0 (고속 병렬 + 무결점 최종 패치)
 # ==========================================
 import os
 import yfinance as yf
@@ -43,7 +43,7 @@ elif RUN_MARKET == 'US': target_market, market_title = 'US', "🇺🇸 미국장
 else: target_market, market_title = 'ALL', "🌐 통합 트렌드 라이더 모드"
 
 print(f"⏰ 현재 한국시간: {kr_time.strftime('%Y-%m-%d %H:%M:%S')}")
-print(f"🎯 V35.0 고속 병렬 최적화 봇 가동 (50만 원 세팅): {market_title}\n")
+print(f"🎯 V35.0 무결점 봇 가동 (50만 원 세팅): {market_title}\n")
 
 # 🌟 2. KIS API 통신 모듈
 def get_kis_token():
@@ -99,7 +99,7 @@ def execute_order(ticker, qty, side="BUY", price=0.0):
     except Exception as e: return {"success": False, "msg": f"❌ 에러({e})"}
 
 # ==========================================
-# 🌟 3. 자본 세팅 및 독립 마켓 방어막
+# 🌟 3. 50만 원 자본 세팅 및 독립 마켓 방어막
 # ==========================================
 TOTAL_CAPITAL = 500000        
 MAX_POSITIONS = 4          
@@ -201,7 +201,7 @@ current_kr_positions = sum(1 for p in portfolio.values() if isinstance(p, dict) 
 current_us_positions = sum(1 for p in portfolio.values() if isinstance(p, dict) and p.get('market') == 'US')
 
 # ==========================================
-# 🌟 4. 유니버스 구축 및 고속 병렬 데이터 스캔
+# 🌟 4. 유니버스 구축 및 고속 병렬 스캔
 # ==========================================
 tickers_dict = {}
 if target_market in ['KR_KOSPI', 'ALL']:
@@ -249,7 +249,6 @@ def calc_indicators(df):
 
 print("⚡ 미국장 및 한국장 고속 병렬 데이터 다운로드 및 지표 계산 중...")
 
-# 1. 미국장 일괄 다운로드 (Threading 지원)
 if target_market in ['US', 'ALL'] and us_tickers:
     try:
         us_data = yf.download(us_tickers, start=fdr_start_date, end=fetch_end_date, group_by='ticker', threads=True, progress=False)
@@ -262,7 +261,6 @@ if target_market in ['US', 'ALL'] and us_tickers:
             except: continue
     except: pass
 
-# 2. 한국장 병렬 다운로드 (ThreadPoolExecutor)
 def fetch_kr(item):
     ticker, (market, name, code) = item
     if market.startswith('KR') and target_market in [market, 'ALL']:
@@ -279,7 +277,6 @@ if kr_items and target_market in ['KR_KOSPI', 'KR_KOSDAQ', 'ALL']:
         for ticker, df in results:
             if df is not None: data_store[ticker] = df
 
-# 포트폴리오 보유 종목 중 누락된 종목 추가 확보
 for ticker, pos in portfolio.items():
     if ticker not in data_store:
         try:
@@ -294,6 +291,9 @@ for ticker, pos in portfolio.items():
 prices_cache = {}
 kr_candidates, us_candidates = [], []
 
+# ==========================================
+# 🌟 5. 매매 심사 및 집행 (토큰 검증 블록)
+# ==========================================
 if kis_token:
     for ticker, df in data_store.items():
         if ticker not in tickers_dict: continue
@@ -303,6 +303,8 @@ if kis_token:
         curr_price = float(df['Close'].iloc[-1])
         prices_cache[ticker] = curr_price
         is_kr = market.startswith('KR')
+        
+        # 💡 [결함 패치] 미국장/한국장 달러 환산 기준 명확화
         krw_price = curr_price if is_kr else curr_price * 1350.0
 
         # [A] 매도 로직 (고정 손절 + 추세 익절 + 타임스탑)
@@ -343,8 +345,9 @@ if kis_token:
                     else: current_us_positions -= 1
                     del portfolio[ticker] 
 
-        # [B] 매수 로직
+        # [B] 매수 후보 스캔
         elif ticker not in portfolio:
+            # 💡 [결함 패치] 원화 환산 가격으로 50만 원 자본(1슬롯) 한도 엄격 필터링
             if krw_price > POSITION_SIZE_KRW: continue
             unit_size = math.floor(POSITION_SIZE_KRW / krw_price)
             if unit_size == 0: continue
@@ -363,7 +366,7 @@ if kis_token:
                 if curr_price > ma_120 and rsi_2 < 10.0:
                     kr_candidates.append({'ticker': ticker, 'name': name, 'market': market, 'price': curr_price, 'units': unit_size, 'score': rsi_2})
 
-    # [C] 랭킹 정렬 및 매수 체결
+    # 💡 [결함 패치] 매수 정렬 및 집행은 반드시 전체 스캔(for 문)이 '완전히 끝난 뒤(바깥쪽)'에 실행
     us_candidates.sort(key=lambda x: x['score'], reverse=True)
     kr_candidates.sort(key=lambda x: x['score'])
     
@@ -386,19 +389,22 @@ if kis_token:
             if is_kr_cand: current_kr_positions += 1
             else: current_us_positions += 1
 
+# 대시보드 리스트 생성
 for ticker, pos in portfolio.items():
     cp = prices_cache.get(ticker, pos.get('buy_price', 0))
     dashboard_list.append({"name": pos.get('name', ticker), "units": pos.get('units', 0), "current_price": round(cp, 2), "buy_price": round(pos.get('buy_price', 0), 2)})
 
 # ==========================================
-# 🌟 5. 디스코드 브리핑 및 구글 DB 저장
+# 🌟 6. 디스코드 브리핑 및 구글 DB 저장
 # ==========================================
-if not kis_token: final_content = "🚨 **시스템 경보** API 토큰 발급 실패"
-else:
-    b_sigs = [s for s in buy_signals if '진입' in s or '돌파' in s or '패닉' in s]
-    buy_text = '\n'.join(b_sigs[:10]) if b_sigs else '신호 없음'
-    sell_text = '\n'.join(sell_signals[:10]) if sell_signals else '신호 없음'
+# 💡 [결함 패치] b_sigs 변수를 토큰 상태와 무관하게 전역에서 안전하게 생성 (NameError 방지)
+b_sigs = [s for s in buy_signals if '줍기' in s or '돌파' in s or '패닉' in s]
+buy_text = '\n'.join(b_sigs[:10]) if b_sigs else '신호 없음'
+sell_text = '\n'.join(sell_signals[:10]) if sell_signals else '신호 없음'
 
+if not kis_token: 
+    final_content = f"🚨 **시스템 경보** API 토큰 발급 실패 ({market_title} 매매 보류)"
+else:
     if buy_signals or sell_signals or skipped_signals:
         prompt = f"[매수] {buy_text}\n[청산] {sell_text}\n[보류] {skipped_signals}"
         response_text = ""
@@ -408,9 +414,9 @@ else:
                 break 
             except: time.sleep(5)
         if not response_text: response_text = f"**매수**\n{buy_text}\n\n**청산**\n{sell_text}"
-        final_content = f"🤖 **V35.0 트렌드 라이더 (병렬 최적화) ({market_title})** 🤖\n{response_text}"
+        final_content = f"🤖 **V35.0 트렌드 라이더 ({market_title})** 🤖\n{response_text}"
     else:
-        final_content = f"🤖 **V35.0 트렌드 라이더 ({market_title} 관망)** 🤖\n독립 방어막 가동 중 / 잔고: 한국 {current_kr_positions}개, 미국 {current_us_positions}개."
+        final_content = f"🤖 **V35.0 트렌드 라이더 ({market_title} 관망)** 🤖\n방어막 및 보유 종목 관망 중 / 잔고: 한국 {current_kr_positions}개, 미국 {current_us_positions}개."
 
 try: requests.post(DISCORD_WEBHOOK_URL, json={"content": final_content[:1900]}, timeout=10)
 except: pass
