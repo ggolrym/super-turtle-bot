@@ -1,5 +1,5 @@
 # ==========================================
-# 🚀 AI 하이브리드 터틀 봇 V35.0 (전체 시장 스캔 + 주도주 동적 필터링)
+# 🚀 AI 하이브리드 터틀 봇 V35.0 (에러 투명성 및 통신 강화 패치)
 # ==========================================
 import os
 import yfinance as yf
@@ -39,7 +39,7 @@ elif RUN_MARKET == 'US': target_market, market_title = 'US', "🇺🇸 미국장
 else: target_market, market_title = 'ALL', "🌐 통합 트렌드 라이더 모드"
 
 print(f"⏰ 현재 한국시간: {kr_time.strftime('%Y-%m-%d %H:%M:%S')}")
-print(f"🎯 V35.0 실전 라이브 가동: {market_title} (전체 시장 동적 스캔)\n")
+print(f"🎯 V35.0 실전 라이브 가동: {market_title}\n")
 
 # 🌟 2. KIS API 통신 모듈
 def get_kis_token():
@@ -50,7 +50,7 @@ def get_kis_token():
         res = requests.post(url, headers=headers, data=json.dumps(body), timeout=10)
         return res.json().get("access_token") if res.status_code == 200 else None
     except Exception as e: 
-        print(f"⚠️ 토큰 발급 에러: {e}")
+        print(f"⚠️ KIS 토큰 발급 에러 (증권사 서버 접속불가 의심): {e}")
         return None
 
 kis_token = get_kis_token()
@@ -155,6 +155,7 @@ def sync_portfolio_with_kis_balance(current_portfolio):
     clean_account = KIS_ACCOUNT.replace("-", "")
     cano, prdt_cd = clean_account[:8], (clean_account[8:10] if len(clean_account) >= 10 else "01")
     tr_prefix = "V" if "openapivts" in KIS_URL else "T"
+    
     kr_tickers, us_tickers = {}, {}
     kr_api_success, us_api_success = False, False 
     headers = {"Content-Type": "application/json; charset=utf-8", "authorization": f"Bearer {kis_token}", "appkey": KIS_APP_KEY, "appsecret": KIS_APP_SECRET}
@@ -219,10 +220,10 @@ current_kr_positions = sum(1 for p in portfolio.values() if isinstance(p, dict) 
 current_us_positions = sum(1 for p in portfolio.values() if isinstance(p, dict) and p.get('market') == 'US')
 
 # ==========================================
-# 🌟 4. [핵심] 거래대금 필터링 & 동적 유니버스 구축
+# 🌟 4. 거래대금 필터링 & 유니버스 구축
 # ==========================================
-MIN_TURNOVER_KRW = 10000000000  # 1. 거래대금 100억 이상 (주도주)
-MIN_PRICE_KRW = 1000            # 2. 주가 1000원 이상 (동전주 제외)
+MIN_TURNOVER_KRW = 10000000000 
+MIN_PRICE_KRW = 1000           
 all_stocks = {}
 
 print(f"⏳ 전체 시장 유니버스 사전 필터링 중... (거래대금 100억 이상 핫한 주식만 추출)")
@@ -234,7 +235,6 @@ if target_market in ['KR_KOSPI', 'ALL']:
             try:
                 price = float(row.get('Close', 0))
                 amount = float(row.get('Amount', 0)) 
-                # 💡 시가총액 순위(head 150) 폐기 -> 진짜 돈이 몰리는 종목만 필터링
                 if price < MIN_PRICE_KRW or amount < MIN_TURNOVER_KRW: continue
                 code = str(row.get('Code', row.get('Symbol', ''))).zfill(6) + '.KS'
                 all_stocks[code] = ('KR_KOSPI', str(row.get('Name', '')), code)
@@ -248,7 +248,6 @@ if target_market in ['KR_KOSDAQ', 'ALL']:
             try:
                 price = float(row.get('Close', 0))
                 amount = float(row.get('Amount', 0))
-                # 💡 코스닥 전수 검사 후 주도주/투매주만 선별
                 if price < MIN_PRICE_KRW or amount < MIN_TURNOVER_KRW: continue
                 code = str(row.get('Code', row.get('Symbol', ''))).zfill(6) + '.KQ'
                 all_stocks[code] = ('KR_KOSDAQ', str(row.get('Name', '')), code)
@@ -270,7 +269,6 @@ if target_market in ['US', 'ALL']:
         all_stocks['SOXX'] = ('US', 'iShares Semiconductor ETF', 'SOXX')
     except: pass
 
-# 보유 종목은 스캔 대상에 무조건 포함
 for t in portfolio.keys():
     if t not in all_stocks:
         m = 'KR_KOSPI' if t.endswith('.KS') else 'KR_KOSDAQ' if t.endswith('.KQ') else 'US'
@@ -281,28 +279,40 @@ for t in portfolio.keys():
 print(f"⚡ 사전 필터링 완료! 총 {len(all_stocks)}개 정예 종목에 대해 안전한 순차 스캔 시작!")
 
 # ==========================================
-# 🌟 5. 순차 안전 데이터 수집 및 매매 심사
+# 🌟 5. 순차 데이터 수집 및 매매 심사 (💡 핵심: 투명성 패치 적용)
 # ==========================================
 data_store, prices_cache = {}, {}
 fdr_start_date = (kr_time - timedelta(days=250)).strftime('%Y-%m-%d')
+
+error_count = 0 # 에러 횟수 추적기
 
 for ticker, (market, name, code) in all_stocks.items():
     try:
         stock_data = pd.DataFrame()
         if market.startswith('KR'):
-            for _ in range(3):
-                temp_data = fdr.DataReader(code.split('.')[0], start=fdr_start_date)
-                if not temp_data.empty and len(temp_data) > 120:
-                    stock_data = temp_data
-                    break
-                time.sleep(0.05) # 서버 락 방지 (순차 안전 스캔)
+            for attempt in range(3):
+                try:
+                    temp_data = fdr.DataReader(code.split('.')[0], start=fdr_start_date)
+                    if not temp_data.empty and len(temp_data) > 120:
+                        stock_data = temp_data
+                        break
+                except Exception as api_err:
+                    if attempt == 2: # 마지막 재시도까지 실패하면 비명 지르기
+                        print(f"⚠️ [{name}] 데이터 다운로드 실패 (IP 차단 의심): {api_err}")
+                        error_count += 1
+                time.sleep(0.05) 
         else:
             ticker_obj = yf.Ticker(ticker)
-            for _ in range(3):
-                temp_data = ticker_obj.history(period='1y')
-                if not temp_data.empty and len(temp_data) > 120:
-                    stock_data = temp_data
-                    break
+            for attempt in range(3):
+                try:
+                    temp_data = ticker_obj.history(period='1y')
+                    if not temp_data.empty and len(temp_data) > 120:
+                        stock_data = temp_data
+                        break
+                except Exception as api_err:
+                    if attempt == 2:
+                        print(f"⚠️ [{name}] Yahoo 데이터 다운로드 실패: {api_err}")
+                        error_count += 1
                 time.sleep(0.1) 
 
         if stock_data.empty or len(stock_data) < 120: continue 
@@ -318,7 +328,11 @@ for ticker, (market, name, code) in all_stocks.items():
         
         data_store[ticker] = stock_data.dropna()
         prices_cache[ticker] = float(stock_data['Close'].iloc[-1])
-    except: continue
+    except Exception as e: 
+        print(f"🚨 [{name}] 심각한 연산 오류 발생: {e}")
+        continue
+
+print(f"✅ 정밀 스캔 완료! (성공: {len(data_store)}개 / 실패: {error_count}개)")
 
 kr_candidates, us_candidates = [], []
 def fmt_price(p, is_kr): return f"{p:,.0f}" if is_kr else f"{p:,.2f}"
@@ -423,7 +437,7 @@ for ticker, pos in portfolio.items():
 msg_lines = [f"🤖 **V35.0 실전 라이브 ({market_title})** 🤖\n"]
 
 if not kis_token:
-    msg_lines.append("🚨 **시스템 경보:** API 토큰 발급 실패 (매매 보류)")
+    msg_lines.append(f"🚨 **시스템 경보:** API 토큰 발급 실패 (매매 보류)")
 else:
     if buy_signals or sell_signals:
         if buy_signals:
@@ -436,6 +450,8 @@ else:
             msg_lines.append("")
     else:
         msg_lines.append("💤 오늘 발생한 신규 매수/청산 신호가 없습니다.\n")
+
+msg_lines.append(f"**[📊 스캔 보고서]** 정예 종목 {len(data_store)}개 스캔 완료 (실패: {error_count}개)\n")
 
 msg_lines.append("**[💼 현재 보유 포트폴리오]**")
 if not portfolio:
