@@ -1,5 +1,5 @@
 # ==========================================
-# 🚀 AI 하이브리드 터틀 봇 V35.0 (상세 브리핑 및 글자수 방어 패치)
+# 🚀 AI 하이브리드 터틀 봇 V35.0 (전체 시장 스캔 + 주도주 동적 필터링)
 # ==========================================
 import os
 import yfinance as yf
@@ -11,7 +11,6 @@ import math
 import json 
 from datetime import datetime, timedelta
 import pytz
-import concurrent.futures
 import warnings
 import logging
 
@@ -19,7 +18,7 @@ warnings.filterwarnings('ignore')
 logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 
 # 🌟 1. 환경 변수 로드
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip() # 호환성 유지를 위해 변수만 남김
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip() 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
 KIS_APP_KEY = os.environ.get("KIS_APP_KEY", "").strip()
 KIS_APP_SECRET = os.environ.get("KIS_APP_SECRET", "").strip()
@@ -40,7 +39,7 @@ elif RUN_MARKET == 'US': target_market, market_title = 'US', "🇺🇸 미국장
 else: target_market, market_title = 'ALL', "🌐 통합 트렌드 라이더 모드"
 
 print(f"⏰ 현재 한국시간: {kr_time.strftime('%Y-%m-%d %H:%M:%S')}")
-print(f"🎯 V35.0 실전 라이브 가동: {market_title}\n")
+print(f"🎯 V35.0 실전 라이브 가동: {market_title} (전체 시장 동적 스캔)\n")
 
 # 🌟 2. KIS API 통신 모듈
 def get_kis_token():
@@ -59,7 +58,7 @@ print("✅ KIS 토큰 발급 완료!" if kis_token else "❌ KIS 토큰 발급 �
 
 def execute_order(ticker, qty, side="BUY", price=0.0):
     if not kis_token: return {"success": False, "msg": "토큰 없음"}
-    if qty <= 0: return {"success": False, "msg": "수량 부족(0주)"}
+    if qty <= 0: return {"success": False, "msg": "수량 부족"}
     time.sleep(0.5) 
     
     is_krw = ticker.endswith('.KS') or ticker.endswith('.KQ')
@@ -93,7 +92,7 @@ def execute_order(ticker, qty, side="BUY", price=0.0):
         data = res.json()
         if data.get("rt_cd") == "0": return {"success": True, "msg": "체결성공"}
         else: return {"success": False, "msg": f"거절({data.get('msg1')})"}
-    except Exception as e: return {"success": False, "msg": f"에러"}
+    except Exception as e: return {"success": False, "msg": f"통신에러"}
 
 # ==========================================
 # 🌟 3. 자본 세팅 및 독립 마켓 방어막
@@ -124,6 +123,11 @@ is_kospi_bullish = check_market_regime('KS11')
 is_kosdaq_bullish = check_market_regime('KQ11')
 is_us_bullish = check_market_regime('^GSPC')
 
+print(f"🛡️ 독립 방어막(200일선) 상태:")
+print(f"   - 🇰🇷 코스피: {'🟢 상승장' if is_kospi_bullish else '🔴 하락장'}")
+print(f"   - 🚀 코스닥: {'🟢 상승장' if is_kosdaq_bullish else '🔴 하락장'}")
+print(f"   - 🇺🇸 미국장: {'🟢 상승장' if is_us_bullish else '🔴 하락장'}\n")
+
 # DB 보호막
 db_loaded = False
 if SHEET_WEBHOOK_URL:
@@ -145,6 +149,7 @@ if not db_loaded:
     except: pass
     exit(1)
 
+# 실계좌 우선주의 동기화 (Absolute Sync)
 def sync_portfolio_with_kis_balance(current_portfolio):
     if not kis_token: return current_portfolio
     clean_account = KIS_ACCOUNT.replace("-", "")
@@ -161,7 +166,8 @@ def sync_portfolio_with_kis_balance(current_portfolio):
         if res.status_code == 200:
             kr_api_success = True
             for item in res.json().get('output1', []):
-                if int(item.get('hldg_qty', 0)) > 0: kr_tickers[item.get('pdno')] = int(item.get('hldg_qty', 0))
+                qty = int(item.get('hldg_qty', 0))
+                if qty > 0: kr_tickers[item.get('pdno')] = {'qty': qty, 'avg_price': float(item.get('pchs_avg_pric', 0))}
     except: pass
 
     try: 
@@ -174,7 +180,7 @@ def sync_portfolio_with_kis_balance(current_portfolio):
                 qty = int(float(item.get('ccld_qty_smtl1', 0)))
                 if qty > 0:
                     sym = item.get('ovrs_pdno', '').replace('.', '-').replace('/', '-')
-                    if sym: us_tickers[sym] = qty
+                    if sym: us_tickers[sym] = {'qty': qty, 'avg_price': float(item.get('pchs_avg_pric', 0))}
     except: pass
 
     synced = {}
@@ -182,22 +188,30 @@ def sync_portfolio_with_kis_balance(current_portfolio):
     for t, p in current_portfolio.items():
         if not isinstance(p, dict): continue 
         clean_t = t.split('.')[0]
-        if 'buy_price' not in p: p['buy_price'] = 0.0
-        if 'units' not in p: p['units'] = 1
-        if 'buy_date' not in p: p['buy_date'] = today_str
-        if 'name' not in p: p['name'] = t
-        
         is_kr = t.endswith('.KS') or t.endswith('.KQ')
         if is_kr:
             if not kr_api_success: synced[t] = p 
             elif clean_t in kr_tickers or t in kr_tickers:
-                p['units'] = kr_tickers.get(clean_t, kr_tickers.get(t, p['units']))
+                match_k = clean_t if clean_t in kr_tickers else t
+                p['units'] = kr_tickers[match_k]['qty']
+                if p.get('buy_price', 0) == 0: p['buy_price'] = kr_tickers[match_k]['avg_price']
                 synced[t] = p
+                del kr_tickers[match_k] 
         else:
             if not us_api_success: synced[t] = p 
             elif clean_t in us_tickers or t in us_tickers:
-                p['units'] = us_tickers.get(clean_t, us_tickers.get(t, p['units']))
+                match_k = clean_t if clean_t in us_tickers else t
+                p['units'] = us_tickers[match_k]['qty']
+                if p.get('buy_price', 0) == 0: p['buy_price'] = us_tickers[match_k]['avg_price']
                 synced[t] = p
+                del us_tickers[match_k] 
+
+    if us_api_success:
+        for sym, data in us_tickers.items():
+            synced[sym] = {'name': sym, 'units': data['qty'], 'buy_price': data['avg_price'], 'market': 'US', 'buy_date': today_str}
+    if kr_api_success:
+        for code, data in kr_tickers.items():
+            synced[f"{code}.KS"] = {'name': code, 'units': data['qty'], 'buy_price': data['avg_price'], 'market': 'KR_KOSPI', 'buy_date': today_str}
     return synced
 
 portfolio = sync_portfolio_with_kis_balance(portfolio)
@@ -205,33 +219,41 @@ current_kr_positions = sum(1 for p in portfolio.values() if isinstance(p, dict) 
 current_us_positions = sum(1 for p in portfolio.values() if isinstance(p, dict) and p.get('market') == 'US')
 
 # ==========================================
-# 🌟 4. 거래대금 필터링 & 유니버스 구축
+# 🌟 4. [핵심] 거래대금 필터링 & 동적 유니버스 구축
 # ==========================================
-MIN_TURNOVER_KRW = 10000000000 
-MIN_PRICE_KRW = 1000           
+MIN_TURNOVER_KRW = 10000000000  # 1. 거래대금 100억 이상 (주도주)
+MIN_PRICE_KRW = 1000            # 2. 주가 1000원 이상 (동전주 제외)
 all_stocks = {}
+
+print(f"⏳ 전체 시장 유니버스 사전 필터링 중... (거래대금 100억 이상 핫한 주식만 추출)")
 
 if target_market in ['KR_KOSPI', 'ALL']:
     try:
         kr_df = fdr.StockListing('KOSPI')
         for _, row in kr_df.iterrows(): 
             try:
-                if float(row.get('Close', 0)) < MIN_PRICE_KRW or float(row.get('Amount', 0)) < MIN_TURNOVER_KRW: continue
+                price = float(row.get('Close', 0))
+                amount = float(row.get('Amount', 0)) 
+                # 💡 시가총액 순위(head 150) 폐기 -> 진짜 돈이 몰리는 종목만 필터링
+                if price < MIN_PRICE_KRW or amount < MIN_TURNOVER_KRW: continue
                 code = str(row.get('Code', row.get('Symbol', ''))).zfill(6) + '.KS'
                 all_stocks[code] = ('KR_KOSPI', str(row.get('Name', '')), code)
             except: continue
-    except: pass
+    except Exception as e: print(f"⚠️ KOSPI 목록 스캔 에러: {e}")
 
 if target_market in ['KR_KOSDAQ', 'ALL']:
     try:
         kq_df = fdr.StockListing('KOSDAQ')
         for _, row in kq_df.iterrows():
             try:
-                if float(row.get('Close', 0)) < MIN_PRICE_KRW or float(row.get('Amount', 0)) < MIN_TURNOVER_KRW: continue
+                price = float(row.get('Close', 0))
+                amount = float(row.get('Amount', 0))
+                # 💡 코스닥 전수 검사 후 주도주/투매주만 선별
+                if price < MIN_PRICE_KRW or amount < MIN_TURNOVER_KRW: continue
                 code = str(row.get('Code', row.get('Symbol', ''))).zfill(6) + '.KQ'
                 all_stocks[code] = ('KR_KOSDAQ', str(row.get('Name', '')), code)
             except: continue
-    except: pass
+    except Exception as e: print(f"⚠️ KOSDAQ 목록 스캔 에러: {e}")
 
 if target_market in ['US', 'ALL']:
     try:
@@ -248,13 +270,18 @@ if target_market in ['US', 'ALL']:
         all_stocks['SOXX'] = ('US', 'iShares Semiconductor ETF', 'SOXX')
     except: pass
 
+# 보유 종목은 스캔 대상에 무조건 포함
 for t in portfolio.keys():
     if t not in all_stocks:
         m = 'KR_KOSPI' if t.endswith('.KS') else 'KR_KOSDAQ' if t.endswith('.KQ') else 'US'
         all_stocks[t] = (m, portfolio[t].get('name', t), t)
+    else:
+        portfolio[t]['name'] = all_stocks[t][1]
+
+print(f"⚡ 사전 필터링 완료! 총 {len(all_stocks)}개 정예 종목에 대해 안전한 순차 스캔 시작!")
 
 # ==========================================
-# 🌟 5. 순차 데이터 수집 및 매매 심사
+# 🌟 5. 순차 안전 데이터 수집 및 매매 심사
 # ==========================================
 data_store, prices_cache = {}, {}
 fdr_start_date = (kr_time - timedelta(days=250)).strftime('%Y-%m-%d')
@@ -268,7 +295,7 @@ for ticker, (market, name, code) in all_stocks.items():
                 if not temp_data.empty and len(temp_data) > 120:
                     stock_data = temp_data
                     break
-                time.sleep(0.05) 
+                time.sleep(0.05) # 서버 락 방지 (순차 안전 스캔)
         else:
             ticker_obj = yf.Ticker(ticker)
             for _ in range(3):
@@ -294,7 +321,6 @@ for ticker, (market, name, code) in all_stocks.items():
     except: continue
 
 kr_candidates, us_candidates = [], []
-
 def fmt_price(p, is_kr): return f"{p:,.0f}" if is_kr else f"{p:,.2f}"
 
 if kis_token:
@@ -394,7 +420,6 @@ for ticker, pos in portfolio.items():
         "invested": round(bp * units, 2), "return_pct": round(ret_pct, 2), "stop_loss": round(sl_price, 2)
     })
 
-# 💡 [핵심 패치] 디스코드 텍스트 생성 (AI 생략, 1900자 제한 방어)
 msg_lines = [f"🤖 **V35.0 실전 라이브 ({market_title})** 🤖\n"]
 
 if not kis_token:
@@ -426,10 +451,7 @@ else:
         msg_lines.append(f"🔸 {pos.get('name')}: {fmt_price(bp, is_kr)} ➔ {fmt_price(cp, is_kr)} ({ret:+.2f}%) | SL: {fmt_price(sl_price, is_kr)}")
 
 final_content = "\n".join(msg_lines)
-
-# 2000자 초과 방어
-if len(final_content) > 1900:
-    final_content = final_content[:1850] + "\n\n... (글자수 제한으로 이하 생략)"
+if len(final_content) > 1900: final_content = final_content[:1850] + "\n\n... (글자수 제한으로 이하 생략)"
 
 try: requests.post(DISCORD_WEBHOOK_URL, json={"content": final_content}, timeout=10)
 except Exception as e: print(f"🚨 디스코드 통신 에러: {e}")
