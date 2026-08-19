@@ -3,7 +3,7 @@ name: 🇰🇷 KOSPI Bot
 on:
   schedule:
     # 한국시간 15:10 목표 (약 3시간 15분 지연 감안하여 UTC 02:35 예약)
-    - cron: '35 1 * * *'
+    - cron: '35 2 * * *'
   workflow_dispatch:
 
 concurrency:
