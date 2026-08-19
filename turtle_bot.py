@@ -1,5 +1,5 @@
 # ==========================================
-# 🚀 AI 하이브리드 터틀 봇 V36.1 Alpha Engine (완결형 실전판)
+# 🚀 AI 하이브리드 터틀 봇 V36.1 Alpha Engine (완결형 실전판 / API 에러 방어 패치)
 # ==========================================
 import os
 import yfinance as yf
@@ -24,6 +24,7 @@ KIS_APP_KEY = os.environ.get("KIS_APP_KEY", "").strip()
 KIS_APP_SECRET = os.environ.get("KIS_APP_SECRET", "").strip()
 KIS_ACCOUNT = os.environ.get("KIS_ACCOUNT", "").strip()
 SHEET_WEBHOOK_URL = os.environ.get("SHEET_WEBHOOK_URL", "").strip() 
+RUN_MARKET = os.environ.get("RUN_MARKET", "AUTO").strip()
 
 if not all([DISCORD_WEBHOOK_URL, KIS_APP_KEY, KIS_APP_SECRET, KIS_ACCOUNT, SHEET_WEBHOOK_URL]):
     print("🚨 필수 API 키 또는 깃허브 시크릿 누락!")
@@ -39,6 +40,11 @@ try:
     ex_df = fdr.DataReader('USD/KRW', start=(kr_time - timedelta(days=7)).strftime('%Y-%m-%d'))
     if not ex_df.empty: EXCHANGE_RATE = float(ex_df['Close'].iloc[-1])
 except: pass
+
+if RUN_MARKET == 'KOSPI': target_market, market_title = 'KR_KOSPI', "🇰🇷 코스피"
+elif RUN_MARKET == 'KOSDAQ': target_market, market_title = 'KR_KOSDAQ', "🚀 코스닥"
+elif RUN_MARKET == 'US': target_market, market_title = 'US', "🇺🇸 미국장"
+else: target_market, market_title = 'ALL', "🌐 통합장"
 
 print(f"⏰ 현재 한국시간: {kr_time.strftime('%Y-%m-%d %H:%M:%S')} (적용 환율: {EXCHANGE_RATE:,.1f}원)")
 print(f"🎯 V36.1 Alpha Engine 가동 (듀얼 방어막 + 동적 복리 + RVOL + 쿨다운)\n")
@@ -104,7 +110,7 @@ MAX_KR_POSITIONS = 2
 MAX_US_POSITIONS = 2        
 POSITION_SIZE_RATIO = 0.25 # 총 자본의 25% (복리 적용)
 
-FIXED_STOP_LOSS_KR = 0.06  
+FIXED_STOP_LOSS_KR = 0.08  
 FIXED_STOP_LOSS_US = 0.08  
 MAX_HOLD_DAYS = 20         
 
@@ -163,7 +169,7 @@ for t, expire_date in cooldown_tracker.items():
     except: pass
 cooldown_tracker = active_cooldowns
 
-# 잔고 이중 검증 및 서버 장중 손절 감지
+# 잔고 이중 검증 및 서버 장중 손절 감지 (💡 API 에러 방어 패치 완료)
 def sync_portfolio_with_kis_balance(current_portfolio):
     if not kis_token: return current_portfolio
     clean_account = KIS_ACCOUNT.replace("-", "")
@@ -222,13 +228,20 @@ def sync_portfolio_with_kis_balance(current_portfolio):
             cooldown_tracker[t] = (kr_time + timedelta(days=5)).strftime('%Y-%m-%d')
             continue
             
+        # 💡 [버그 픽스] API 통신 실패 시 장부 데이터 무조건 보존
         if is_kr:
+            if not kr_api_success: 
+                synced[t] = p
+                continue
             match_k = clean_t if clean_t in kr_tickers else t
             p['units'] = kr_tickers[match_k]['qty']
             if p.get('buy_price', 0) == 0: p['buy_price'] = kr_tickers[match_k]['avg_price']
             synced[t] = p
             del kr_tickers[match_k] 
         else:
+            if not us_api_success: 
+                synced[t] = p
+                continue
             match_k = clean_t if clean_t in us_tickers else t
             p['units'] = us_tickers[match_k]['qty']
             if p.get('buy_price', 0) == 0: p['buy_price'] = us_tickers[match_k]['avg_price']
