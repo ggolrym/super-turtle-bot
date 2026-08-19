@@ -153,8 +153,16 @@ if SHEET_WEBHOOK_URL:
                     data = json.loads(raw_text)
                     if isinstance(data, dict): 
                         portfolio = data.get('portfolio', data) 
-                        bot_cash = float(data.get('bot_cash', 500000))
                         cooldown_tracker = data.get('cooldown_tracker', {})
+                        
+                        # 💡 [버그 픽스] 이전 버전 시트 호환 및 이중계산 방지 로직
+                        if 'bot_cash' in data: 
+                            bot_cash = float(data['bot_cash'])
+                        else:
+                            # 현금 기록이 없다면? -> 50만 원에서 '이미 주식 사는데 쓴 돈'을 뺀 나머지를 현금으로 역산
+                            invested = sum(p.get('buy_price', 0) * p.get('units', 0) * (1 if str(p.get('market', '')).startswith('KR') else EXCHANGE_RATE) for p in portfolio.values() if isinstance(p, dict))
+                            bot_cash = 500000 - invested
+                            
                 db_loaded = True
                 break
             time.sleep(5)
