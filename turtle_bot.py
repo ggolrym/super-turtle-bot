@@ -1,5 +1,5 @@
 # ==========================================
-# 🚀 AI 하이브리드 터틀 봇 V35.0 (잔고 인식 오류 완벽 패치)
+# 🚀 AI 하이브리드 터틀 봇 V36.1 Alpha Engine (완결형 실전판)
 # ==========================================
 import os
 import yfinance as yf
@@ -24,7 +24,6 @@ KIS_APP_KEY = os.environ.get("KIS_APP_KEY", "").strip()
 KIS_APP_SECRET = os.environ.get("KIS_APP_SECRET", "").strip()
 KIS_ACCOUNT = os.environ.get("KIS_ACCOUNT", "").strip()
 SHEET_WEBHOOK_URL = os.environ.get("SHEET_WEBHOOK_URL", "").strip() 
-RUN_MARKET = os.environ.get("RUN_MARKET", "AUTO").strip() 
 
 if not all([DISCORD_WEBHOOK_URL, KIS_APP_KEY, KIS_APP_SECRET, KIS_ACCOUNT, SHEET_WEBHOOK_URL]):
     print("🚨 필수 API 키 또는 깃허브 시크릿 누락!")
@@ -32,14 +31,17 @@ if not all([DISCORD_WEBHOOK_URL, KIS_APP_KEY, KIS_APP_SECRET, KIS_ACCOUNT, SHEET
 
 KIS_URL = "https://openapivts.koreainvestment.com:29443" 
 kr_time = datetime.now(pytz.timezone('Asia/Seoul'))
+today_str = kr_time.strftime('%Y-%m-%d')
 
-if RUN_MARKET == 'KOSPI': target_market, market_title = 'KR_KOSPI', "🇰🇷 코스피 (트렌드 라이더)"
-elif RUN_MARKET == 'KOSDAQ': target_market, market_title = 'KR_KOSDAQ', "🚀 코스닥 (트렌드 라이더)"
-elif RUN_MARKET == 'US': target_market, market_title = 'US', "🇺🇸 미국장 (트렌드 라이더)"
-else: target_market, market_title = 'ALL', "🌐 통합 트렌드 라이더 모드"
+# 💡 [보완 1] 실시간 환율 동적 조회 (실패 시 기본값 1350.0)
+EXCHANGE_RATE = 1350.0
+try:
+    ex_df = fdr.DataReader('USD/KRW', start=(kr_time - timedelta(days=7)).strftime('%Y-%m-%d'))
+    if not ex_df.empty: EXCHANGE_RATE = float(ex_df['Close'].iloc[-1])
+except: pass
 
-print(f"⏰ 현재 한국시간: {kr_time.strftime('%Y-%m-%d %H:%M:%S')}")
-print(f"🎯 V35.0 실전 라이브 가동: {market_title}\n")
+print(f"⏰ 현재 한국시간: {kr_time.strftime('%Y-%m-%d %H:%M:%S')} (적용 환율: {EXCHANGE_RATE:,.1f}원)")
+print(f"🎯 V36.1 Alpha Engine 가동 (듀얼 방어막 + 동적 복리 + RVOL + 쿨다운)\n")
 
 # 🌟 2. KIS API 통신 모듈
 def get_kis_token():
@@ -82,7 +84,7 @@ def execute_order(ticker, qty, side="BUY", price=0.0):
             if ex_info in ['NYQ', 'NYSE']: excg_cd = 'NYS'
             elif ex_info in ['ASE', 'NYSE MKT', 'PNK', 'PCX']: excg_cd = 'AMS'
         except: pass
-        if clean_ticker in ['SPLG', 'SPY', 'GLDM', 'GLD', 'TLT', 'DBC', 'VNQ', 'SH', 'PSQ', 'QQQM']: excg_cd = 'AMS'
+        if clean_ticker in ['SPLG', 'QQQM', 'SOXX', 'SPY', 'GLDM', 'GLD', 'TLT', 'DBC', 'VNQ', 'SH', 'PSQ']: excg_cd = 'AMS'
             
         target_price = round(price, 2)
         body = {"CANO": cano, "ACNT_PRDT_CD": prdt_cd, "OVRS_EXCG_CD": excg_cd, "PDNO": clean_ticker, "ORD_QTY": str(int(qty)), "OVRS_ORD_UNPR": f"{target_price:.2f}", "ORD_SVR_DVSN_CD": "0", "ORD_DVSN": "00"}
@@ -95,40 +97,45 @@ def execute_order(ticker, qty, side="BUY", price=0.0):
     except Exception as e: return {"success": False, "msg": f"통신에러"}
 
 # ==========================================
-# 🌟 3. 자본 세팅 및 독립 마켓 방어막
+# 🌟 3. 자본 세팅 및 듀얼 매크로 방어막
 # ==========================================
-TOTAL_CAPITAL = 500000        
 MAX_POSITIONS = 4          
 MAX_KR_POSITIONS = 2        
 MAX_US_POSITIONS = 2        
-POSITION_SIZE_KRW = TOTAL_CAPITAL * 0.25  
+POSITION_SIZE_RATIO = 0.25 # 총 자본의 25% (복리 적용)
 
-FIXED_STOP_LOSS_KR = 0.08  
+FIXED_STOP_LOSS_KR = 0.06  
 FIXED_STOP_LOSS_US = 0.08  
-MAX_HOLD_DAYS = 25         
+MAX_HOLD_DAYS = 20         
 
-buy_signals, sell_signals, skipped_signals = [], [], []
+buy_signals, sell_signals = [], []
 dashboard_list = [] 
 portfolio = {}
+bot_cash = 500000 
+cooldown_tracker = {} 
 
-def check_market_regime(index_ticker):
+def check_macro_regime(index_ticker):
     try:
         if index_ticker.startswith('^'): df = yf.Ticker(index_ticker).history(period='1y')
-        else: df = fdr.DataReader(index_ticker, start=(datetime.now() - timedelta(days=300)).strftime('%Y-%m-%d'))
-        if df.empty: return True
-        return float(df['Close'].iloc[-1]) >= float(df['Close'].rolling(200).mean().iloc[-1])
+        else: df = fdr.DataReader(index_ticker, start=(kr_time - timedelta(days=300)).strftime('%Y-%m-%d'))
+        if df.empty or len(df) < 200: return True
+        curr_close = float(df['Close'].iloc[-1])
+        ma50 = float(df['Close'].rolling(50).mean().iloc[-1])
+        ma200 = float(df['Close'].rolling(200).mean().iloc[-1])
+        return (curr_close >= ma50) and (curr_close >= ma200)
     except: return True
 
-is_kospi_bullish = check_market_regime('KS11')
-is_kosdaq_bullish = check_market_regime('KQ11')
-is_us_bullish = check_market_regime('^GSPC')
+macro_bull = {
+    'KR_KOSPI': check_macro_regime('KS11'),
+    'KR_KOSDAQ': check_macro_regime('KQ11'),
+    'US': check_macro_regime('^GSPC')
+}
 
-print(f"🛡️ 독립 방어막(200일선) 상태:")
-print(f"   - 🇰🇷 코스피: {'🟢 상승장' if is_kospi_bullish else '🔴 하락장'}")
-print(f"   - 🚀 코스닥: {'🟢 상승장' if is_kosdaq_bullish else '🔴 하락장'}")
-print(f"   - 🇺🇸 미국장: {'🟢 상승장' if is_us_bullish else '🔴 하락장'}\n")
+print(f"🛡️ 듀얼 방어막(MA50 & MA200) 상태:")
+print(f" - KR(코스피/코스닥): {'🟢' if macro_bull['KR_KOSPI'] else '🔴'} / {'🟢' if macro_bull['KR_KOSDAQ'] else '🔴'}")
+print(f" - US(S&P500): {'🟢' if macro_bull['US'] else '🔴'}\n")
 
-# DB 보호막
+# DB에서 포트폴리오, 현금, 쿨다운 데이터 불러오기
 db_loaded = False
 if SHEET_WEBHOOK_URL:
     for attempt in range(3):
@@ -138,18 +145,25 @@ if SHEET_WEBHOOK_URL:
                 raw_text = res.text.strip()
                 if raw_text.startswith('{') and raw_text.endswith('}'):
                     data = json.loads(raw_text)
-                    if isinstance(data, dict): portfolio = data.get('portfolio', data) 
+                    if isinstance(data, dict): 
+                        portfolio = data.get('portfolio', data) 
+                        bot_cash = float(data.get('bot_cash', 500000))
+                        cooldown_tracker = data.get('cooldown_tracker', {})
                 db_loaded = True
                 break
             time.sleep(5)
         except: time.sleep(5)
 
-if not db_loaded:
-    try: requests.post(DISCORD_WEBHOOK_URL, json={"content": f"🚨 [{market_title}] 구글 DB 응답 없음. 봇 강제 종료."}, timeout=10)
+# 만료된 쿨다운 자동 정리
+active_cooldowns = {}
+for t, expire_date in cooldown_tracker.items():
+    try:
+        if datetime.strptime(expire_date, '%Y-%m-%d').date() > kr_time.date():
+            active_cooldowns[t] = expire_date
     except: pass
-    exit(1)
+cooldown_tracker = active_cooldowns
 
-# 💡 [핵심 패치] KIS 잔고 Absolute Sync (이중 검증)
+# 잔고 이중 검증 및 서버 장중 손절 감지
 def sync_portfolio_with_kis_balance(current_portfolio):
     if not kis_token: return current_portfolio
     clean_account = KIS_ACCOUNT.replace("-", "")
@@ -160,81 +174,71 @@ def sync_portfolio_with_kis_balance(current_portfolio):
     kr_api_success, us_api_success = False, False 
     headers = {"Content-Type": "application/json; charset=utf-8", "authorization": f"Bearer {kis_token}", "appkey": KIS_APP_KEY, "appsecret": KIS_APP_SECRET}
     
-    # 1. 한국장 잔고 조회
     try: 
         headers["tr_id"] = f"{tr_prefix}TTC8434R"
         params = {"CANO": cano, "ACNT_PRDT_CD": prdt_cd, "AFHR_FLPR_YN": "N", "OFL_YN": "", "INQR_DVSN": "01", "UNPR_DVSN": "01", "FUND_STTL_ICLD_YN": "N", "FNCG_AMT_AUTO_RDPT_YN": "N", "PRCS_DVSN": "00", "CTX_AREA_FK100": "", "CTX_AREA_NK100": ""}
         res = requests.get(f"{KIS_URL}/uapi/domestic-stock/v1/trading/inquire-balance", headers=headers, params=params, timeout=10)
         data = res.json()
-        if res.status_code == 200 and data.get('rt_cd') == '0': # 완벽한 성공 검증
+        if res.status_code == 200 and data.get('rt_cd') == '0':
             kr_api_success = True
             for item in data.get('output1', []):
                 qty = int(item.get('hldg_qty', 0))
                 if qty > 0: kr_tickers[item.get('pdno')] = {'qty': qty, 'avg_price': float(item.get('pchs_avg_pric', 0))}
-        else: print(f"⚠️ 한국장 잔고 API 실패: {data.get('msg1')}")
-    except Exception as e: print(f"🚨 한국장 통신 에러: {e}")
+    except: pass
 
-    # 2. 미국장 잔고 조회 (파라미터 완전 교정)
     try: 
         headers["tr_id"] = f"{tr_prefix}TTS3012R"
-        params = {
-            "CANO": cano, 
-            "ACNT_PRDT_CD": prdt_cd, 
-            "WCRC_FRCR_DVSN_CD": "02", # 01: 원화, 02: 외화 (기존 오타 교정)
-            "NATN_CD": "840",          # 840: 미국
-            "TR_MKET_CD": "00",        # 00: 전체
-            "INQR_DVSN_CD": "00"       # 00: 전체
-        }
+        params = {"CANO": cano, "ACNT_PRDT_CD": prdt_cd, "WCRC_FRCR_DVSN_CD": "02", "NATN_CD": "840", "TR_MKET_CD": "00", "INQR_DVSN_CD": "00"}
         res = requests.get(f"{KIS_URL}/uapi/overseas-stock/v1/trading/inquire-present-balance", headers=headers, params=params, timeout=10)
         data = res.json()
-        if res.status_code == 200 and data.get('rt_cd') == '0': # 완벽한 성공 검증
+        if res.status_code == 200 and data.get('rt_cd') == '0':
             us_api_success = True
             for item in data.get('output1', []):
-                # 모의투자 버그 대비 듀얼 수량 추적
-                q1 = float(item.get('ccld_qty_smtl1', 0))
-                q2 = float(item.get('cblc_qty13', 0))
-                qty = int(max(q1, q2)) 
-                
+                qty = int(max(float(item.get('ccld_qty_smtl1', 0)), float(item.get('cblc_qty13', 0)))) 
                 if qty > 0:
                     sym = item.get('ovrs_pdno', '').replace('.', '-').replace('/', '-')
                     if sym: us_tickers[sym] = {'qty': qty, 'avg_price': float(item.get('pchs_avg_pric', 0))}
-        else: print(f"⚠️ 미국장 잔고 API 실패: {data.get('msg1')}")
-    except Exception as e: print(f"🚨 미국장 통신 에러: {e}")
+    except: pass
 
+    global bot_cash
     synced = {}
-    today_str = kr_time.strftime('%Y-%m-%d')
-    
-    # 3. 장부(구글시트)와 실계좌 크로스 체크
     for t, p in current_portfolio.items():
         if not isinstance(p, dict): continue 
         clean_t = t.split('.')[0]
         is_kr = t.endswith('.KS') or t.endswith('.KQ')
+        
+        # 서버 장중 손절 감지 로직
+        if is_kr and kr_api_success and (clean_t not in kr_tickers and t not in kr_tickers):
+            print(f"⚠️ {t} KIS 잔고 없음 (장중 서버 자동손절 감지) ➔ 쿨다운 5일 적용")
+            sell_signals.append(f"🔪 서버 장중 손절 감지: {p.get('name')} (현금 회수 완료)")
+            bot_cash += (p['units'] * p['buy_price'] * (1 - FIXED_STOP_LOSS_KR) * 0.997)
+            cooldown_tracker[t] = (kr_time + timedelta(days=5)).strftime('%Y-%m-%d')
+            continue
+            
+        if not is_kr and us_api_success and (clean_t not in us_tickers and t not in us_tickers):
+            print(f"⚠️ {t} KIS 잔고 없음 (장중 서버 자동손절 감지) ➔ 쿨다운 5일 적용")
+            sell_signals.append(f"🔪 서버 장중 손절 감지: {p.get('name')} (현금 회수 완료)")
+            bot_cash += (p['units'] * p['buy_price'] * (1 - FIXED_STOP_LOSS_US) * 0.997 * EXCHANGE_RATE)
+            cooldown_tracker[t] = (kr_time + timedelta(days=5)).strftime('%Y-%m-%d')
+            continue
+            
         if is_kr:
-            if not kr_api_success: synced[t] = p # 에러 시 장부 무조건 보존!
-            elif clean_t in kr_tickers or t in kr_tickers:
-                match_k = clean_t if clean_t in kr_tickers else t
-                p['units'] = kr_tickers[match_k]['qty']
-                if p.get('buy_price', 0) == 0: p['buy_price'] = kr_tickers[match_k]['avg_price']
-                synced[t] = p
-                del kr_tickers[match_k] 
+            match_k = clean_t if clean_t in kr_tickers else t
+            p['units'] = kr_tickers[match_k]['qty']
+            if p.get('buy_price', 0) == 0: p['buy_price'] = kr_tickers[match_k]['avg_price']
+            synced[t] = p
+            del kr_tickers[match_k] 
         else:
-            if not us_api_success: synced[t] = p # 에러 시 장부 무조건 보존!
-            elif clean_t in us_tickers or t in us_tickers:
-                match_k = clean_t if clean_t in us_tickers else t
-                p['units'] = us_tickers[match_k]['qty']
-                if p.get('buy_price', 0) == 0: p['buy_price'] = us_tickers[match_k]['avg_price']
-                synced[t] = p
-                del us_tickers[match_k] 
+            match_k = clean_t if clean_t in us_tickers else t
+            p['units'] = us_tickers[match_k]['qty']
+            if p.get('buy_price', 0) == 0: p['buy_price'] = us_tickers[match_k]['avg_price']
+            synced[t] = p
+            del us_tickers[match_k] 
 
-    # 4. 미아 종목(앱에는 있고 시트에는 없는 종목) 강제 구출
     if us_api_success:
-        for sym, data in us_tickers.items():
-            print(f"📥 수동/누락된 미국 주식 봇에 강제 편입: {sym} ({data['qty']}주)")
-            synced[sym] = {'name': sym, 'units': data['qty'], 'buy_price': data['avg_price'], 'market': 'US', 'buy_date': today_str}
+        for sym, data in us_tickers.items(): synced[sym] = {'name': sym, 'units': data['qty'], 'buy_price': data['avg_price'], 'market': 'US', 'buy_date': today_str, 'hold_days': 0}
     if kr_api_success:
-        for code, data in kr_tickers.items():
-            print(f"📥 수동/누락된 한국 주식 봇에 강제 편입: {code} ({data['qty']}주)")
-            synced[f"{code}.KS"] = {'name': code, 'units': data['qty'], 'buy_price': data['avg_price'], 'market': 'KR_KOSPI', 'buy_date': today_str}
+        for code, data in kr_tickers.items(): synced[f"{code}.KS"] = {'name': code, 'units': data['qty'], 'buy_price': data['avg_price'], 'market': 'KR_KOSPI', 'buy_date': today_str, 'hold_days': 0}
     return synced
 
 portfolio = sync_portfolio_with_kis_balance(portfolio)
@@ -248,7 +252,7 @@ MIN_TURNOVER_KRW = 10000000000
 MIN_PRICE_KRW = 1000           
 all_stocks = {}
 
-print(f"⏳ 전체 시장 유니버스 사전 필터링 중... (거래대금 100억 이상 핫한 주식만 추출)")
+print(f"⏳ 전체 시장 유니버스 사전 필터링 중...")
 
 if target_market in ['KR_KOSPI', 'ALL']:
     try:
@@ -259,7 +263,7 @@ if target_market in ['KR_KOSPI', 'ALL']:
                 code = str(row.get('Code', row.get('Symbol', ''))).zfill(6) + '.KS'
                 all_stocks[code] = ('KR_KOSPI', str(row.get('Name', '')), code)
             except: continue
-    except Exception as e: print(f"⚠️ KOSPI 목록 스캔 에러: {e}")
+    except: pass
 
 if target_market in ['KR_KOSDAQ', 'ALL']:
     try:
@@ -270,20 +274,21 @@ if target_market in ['KR_KOSDAQ', 'ALL']:
                 code = str(row.get('Code', row.get('Symbol', ''))).zfill(6) + '.KQ'
                 all_stocks[code] = ('KR_KOSDAQ', str(row.get('Name', '')), code)
             except: continue
-    except Exception as e: print(f"⚠️ KOSDAQ 목록 스캔 에러: {e}")
+    except: pass
 
+# 💡 [보완 2] 미국 특수 티커(BRK-B, BF-B) 매핑 완벽 복원
+special_tickers = {'BRKB': 'BRK-B', 'BFB': 'BF-B'}
 if target_market in ['US', 'ALL']:
     try:
         us_df = fdr.StockListing('SP500')
         col_sym = 'Symbol' if 'Symbol' in us_df.columns else 'Ticker'
         col_name = 'Name' if 'Name' in us_df.columns else us_df.columns[1]
-        special_tickers = {'BRKB': 'BRK-B', 'BFB': 'BF-B'}
         for _, row in us_df.iterrows(): 
             raw_sym = str(row[col_sym])
             clean_sym = special_tickers.get(raw_sym, raw_sym.replace('.', '-').replace('/', '-'))
             all_stocks[clean_sym] = ('US', str(row[col_name]), clean_sym)
         all_stocks['SPLG'] = ('US', 'SPDR S&P 500 ETF', 'SPLG')
-        all_stocks['QQQ'] = ('US', 'Invesco QQQ Trust', 'QQQ')
+        all_stocks['QQQM'] = ('US', 'Invesco NASDAQ 100 ETF', 'QQQM')
         all_stocks['SOXX'] = ('US', 'iShares Semiconductor ETF', 'SOXX')
     except: pass
 
@@ -291,19 +296,17 @@ for t in portfolio.keys():
     if t not in all_stocks:
         m = 'KR_KOSPI' if t.endswith('.KS') else 'KR_KOSDAQ' if t.endswith('.KQ') else 'US'
         all_stocks[t] = (m, portfolio[t].get('name', t), t)
-    else:
-        portfolio[t]['name'] = all_stocks[t][1]
-
-print(f"⚡ 사전 필터링 완료! 총 {len(all_stocks)}개 정예 종목에 대해 안전한 순차 스캔 시작!")
 
 # ==========================================
-# 🌟 5. 순차 데이터 수집 및 매매 심사
+# 🌟 5. 안전한 순차 데이터 수집 및 지표 계산
 # ==========================================
 data_store, prices_cache = {}, {}
 fdr_start_date = (kr_time - timedelta(days=250)).strftime('%Y-%m-%d')
 error_count = 0
 
 for ticker, (market, name, code) in all_stocks.items():
+    if ticker in cooldown_tracker and ticker not in portfolio: continue
+    
     try:
         stock_data = pd.DataFrame()
         if market.startswith('KR'):
@@ -333,6 +336,8 @@ for ticker, (market, name, code) in all_stocks.items():
         stock_data['MA10'] = stock_data['Close'].rolling(10).mean()
         stock_data['MA20'] = stock_data['Close'].rolling(20).mean()
         stock_data['MA120'] = stock_data['Close'].rolling(120).mean()
+        stock_data['VolMA20'] = stock_data['Volume'].rolling(20).mean().shift(1)
+        
         delta = stock_data['Close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(2).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(2).mean()
@@ -349,59 +354,88 @@ kr_candidates, us_candidates = [], []
 def fmt_price(p, is_kr): return f"{p:,.0f}" if is_kr else f"{p:,.2f}"
 
 if kis_token:
-    for ticker, df in data_store.items():
+    # -----------------------------------
+    # [A] 매도 심사 (EOD 트레일링 익절 & 타임스탑)
+    # -----------------------------------
+    for ticker in list(portfolio.keys()):
+        if ticker not in data_store: continue
+        df = data_store[ticker]
+        pos = portfolio[ticker]
+        
         market, name, _ = all_stocks[ticker]
         curr_price = float(df['Close'].iloc[-1])
         is_kr = market.startswith('KR')
-        krw_price = curr_price if is_kr else curr_price * 1350.0
-
-        # [A] 매도 심사
-        if ticker in portfolio:
-            pos = portfolio[ticker]
-            sell_reason = None
-            buy_price = float(pos.get('buy_price', 0))
-            if buy_price <= 0: buy_price = curr_price
-            
-            days_held = (kr_time.date() - datetime.strptime(pos.get('buy_date', kr_time.strftime('%Y-%m-%d')), '%Y-%m-%d').date()).days
-            ma_10, ma_20 = float(df['MA10'].iloc[-1]), float(df['MA20'].iloc[-1])
-            profit_pct = ((curr_price / buy_price) - 1) * 100
-
-            if is_kr:
-                sl_price = buy_price * (1.0 - FIXED_STOP_LOSS_KR)
-                if curr_price <= sl_price: sell_reason = "손절(-6%)"
-                elif curr_price > buy_price and curr_price < ma_10: sell_reason = "10일선 익절"
-                elif days_held >= MAX_HOLD_DAYS and curr_price <= buy_price: sell_reason = "타임스탑"
-            else:
-                sl_price = buy_price * (1.0 - FIXED_STOP_LOSS_US)
-                if curr_price <= sl_price: sell_reason = "손절(-8%)"
-                elif curr_price > buy_price and curr_price < ma_20: sell_reason = "20일선 익절"
-                elif days_held >= MAX_HOLD_DAYS and curr_price <= buy_price: sell_reason = "타임스탑"
+        
+        buy_price = float(pos.get('buy_price', 0))
+        if buy_price <= 0: buy_price = curr_price
+        
+        hold_days = pos.get('hold_days', 0) + 1
+        portfolio[ticker]['hold_days'] = hold_days
+        
+        profit_pct = ((curr_price / buy_price) - 1) * 100
+        sell_reason = None
+        
+        sl_pct = FIXED_STOP_LOSS_KR if is_kr else FIXED_STOP_LOSS_US
+        sl_price = buy_price * (1.0 - sl_pct)
+        tp_ma = float(df['MA10'].iloc[-1]) if is_kr else float(df['MA20'].iloc[-1])
+        
+        if curr_price <= sl_price: 
+            sell_reason = f"하드스탑(-{sl_pct*100}%)"
+            cooldown_tracker[ticker] = (kr_time + timedelta(days=5)).strftime('%Y-%m-%d')
+        elif curr_price > buy_price and curr_price < tp_ma: 
+            sell_reason = "이평선 추세이탈 익절" 
+        elif hold_days >= MAX_HOLD_DAYS and curr_price <= buy_price: 
+            sell_reason = "타임스탑 탈출"
                 
-            if sell_reason:
-                res = execute_order(ticker, pos['units'], side="SELL", price=curr_price)
-                if res['success']:
-                    sell_signals.append(f"🔴 청산: {name} | 사유: {sell_reason} | 수익: {profit_pct:+.2f}%")
-                    if is_kr: current_kr_positions -= 1
-                    else: current_us_positions -= 1
-                    del portfolio[ticker] 
+        if sell_reason:
+            res = execute_order(ticker, pos['units'], side="SELL", price=curr_price)
+            if res['success']:
+                sell_signals.append(f"🔴 청산: {name} | 사유: {sell_reason} | 수익: {profit_pct:+.2f}%")
+                
+                sell_amt = pos['units'] * curr_price * (1 if is_kr else EXCHANGE_RATE)
+                bot_cash += sell_amt * 0.997 
+                
+                if is_kr: current_kr_positions -= 1
+                else: current_us_positions -= 1
+                del portfolio[ticker] 
 
-        # [B] 매수 심사
-        elif ticker not in portfolio:
-            if krw_price > POSITION_SIZE_KRW: continue
-            unit_size = math.floor(POSITION_SIZE_KRW / krw_price)
-            if unit_size == 0: continue
+    # -----------------------------------
+    # [B] 매수 심사 (동적 자본 복리 적용)
+    # -----------------------------------
+    current_portfolio_value = sum(p['units'] * prices_cache[t] * (1 if str(p.get('market', '')).startswith('KR') else EXCHANGE_RATE) for t, p in portfolio.items() if t in prices_cache)
+    
+    total_bot_equity = bot_cash + current_portfolio_value
+    target_pos_size_krw = total_bot_equity * POSITION_SIZE_RATIO 
+    
+    for ticker, df in data_store.items():
+        if ticker in portfolio: continue
+        market, name, _ = all_stocks[ticker]
+        
+        m_key = 'KR_KOSPI' if market == 'KR_KOSPI' else ('KR_KOSDAQ' if market == 'KR_KOSDAQ' else 'US')
+        if not macro_bull.get(m_key, True): continue 
+        
+        curr_price = float(df['Close'].iloc[-1])
+        is_kr = market.startswith('KR')
+        krw_price = curr_price if is_kr else curr_price * EXCHANGE_RATE
+        
+        if krw_price > target_pos_size_krw: continue
+        unit_size = math.floor(target_pos_size_krw / krw_price)
+        if unit_size == 0: continue
             
-            ma_120, rsi_2, r20h = float(df['MA120'].iloc[-1]), float(df['RSI_2'].iloc[-1]), float(df['Recent20High'].iloc[-1])
+        ma_120 = float(df['MA120'].iloc[-1])
 
-            if market == 'US' and target_market in ['US', 'ALL'] and is_us_bullish:
-                if curr_price > ma_120 and curr_price >= r20h:
-                    us_candidates.append({'ticker': ticker, 'name': name, 'market': 'US', 'price': curr_price, 'units': unit_size, 'krw_price': krw_price, 'score': (curr_price / ma_120)})
-            elif market == 'KR_KOSPI' and target_market in ['KR_KOSPI', 'ALL'] and is_kospi_bullish:
-                if curr_price > ma_120 and rsi_2 < 10.0:
-                    kr_candidates.append({'ticker': ticker, 'name': name, 'market': market, 'price': curr_price, 'units': unit_size, 'krw_price': krw_price, 'score': rsi_2})
-            elif market == 'KR_KOSDAQ' and target_market in ['KR_KOSDAQ', 'ALL'] and is_kosdaq_bullish:
-                if curr_price > ma_120 and rsi_2 < 10.0:
-                    kr_candidates.append({'ticker': ticker, 'name': name, 'market': market, 'price': curr_price, 'units': unit_size, 'krw_price': krw_price, 'score': rsi_2})
+        # 미국: 거래량 동반 모멘텀 돌파 (RVOL >= 1.2)
+        if market == 'US':
+            r20h = float(df['Recent20High'].iloc[-1])
+            vol_cond = (float(df['Volume'].iloc[-1]) >= float(df['VolMA20'].iloc[-1]) * 1.2) if float(df['VolMA20'].iloc[-1]) > 0 else True
+            
+            if curr_price > ma_120 and curr_price >= r20h and vol_cond:
+                us_candidates.append({'ticker': ticker, 'name': name, 'market': market, 'price': curr_price, 'units': unit_size, 'krw_price': krw_price, 'score': (curr_price / ma_120)})
+        # 한국: 투매 줍기 (RSI-2 < 10)
+        elif is_kr:
+            rsi_2 = float(df['RSI_2'].iloc[-1])
+            if curr_price > ma_120 and rsi_2 < 10.0:
+                kr_candidates.append({'ticker': ticker, 'name': name, 'market': market, 'price': curr_price, 'units': unit_size, 'krw_price': krw_price, 'score': rsi_2})
 
     us_candidates.sort(key=lambda x: x['score'], reverse=True)
     kr_candidates.sort(key=lambda x: x['score'])
@@ -414,17 +448,15 @@ if kis_token:
             
         res = execute_order(cand['ticker'], cand['units'], side="BUY", price=cand['price'])
         if res['success']:
-            sl_pct = FIXED_STOP_LOSS_KR if is_kr else FIXED_STOP_LOSS_US
-            sl_price = cand['price'] * (1 - sl_pct)
-            tp_cond = "10일선" if is_kr else "20일선"
             tot_amt = int(cand['units'] * cand['krw_price'])
-            
-            buy_signals.append(f"🟢 매수: {cand['name']} | {fmt_price(cand['price'], is_kr)} x {cand['units']}주 (총 {tot_amt:,}원) | SL: {fmt_price(sl_price, is_kr)} | TP: {tp_cond}")
+            buy_signals.append(f"🟢 매수: {cand['name']} | {fmt_price(cand['price'], is_kr)} x {cand['units']}주 (총 {tot_amt:,}원)")
             
             portfolio[cand['ticker']] = {
                 'name': cand['name'], 'units': cand['units'], 'buy_price': cand['price'], 
-                'market': cand['market'], 'buy_date': kr_time.strftime('%Y-%m-%d')
+                'market': cand['market'], 'buy_date': today_str, 'hold_days': 0
             }
+            bot_cash -= (tot_amt * 1.003) 
+            
             if is_kr: current_kr_positions += 1
             else: current_us_positions += 1
 
@@ -445,14 +477,15 @@ for ticker, pos in portfolio.items():
         "invested": round(bp * units, 2), "return_pct": round(ret_pct, 2), "stop_loss": round(sl_price, 2)
     })
 
-msg_lines = [f"🤖 **V35.0 실전 라이브 ({market_title})** 🤖\n"]
+msg_lines = [f"🤖 **V36.1 Alpha Engine ({market_title})** 🤖\n"]
+msg_lines.append(f"💰 **추정 총자산:** 약 {int(total_bot_equity):,}원 (가용현금: {int(bot_cash):,}원)\n")
 
 if not kis_token:
     msg_lines.append(f"🚨 **시스템 경보:** API 토큰 발급 실패 (매매 보류)")
 else:
     if buy_signals or sell_signals:
         if buy_signals:
-            msg_lines.append("**[🚀 오늘의 신규 매수]**")
+            msg_lines.append("**[🚀 오늘의 신규 매수 (서버 자동주문 필수!)]**")
             msg_lines.extend(buy_signals)
             msg_lines.append("")
         if sell_signals:
@@ -462,11 +495,11 @@ else:
     else:
         msg_lines.append("💤 오늘 발생한 신규 매수/청산 신호가 없습니다.\n")
 
-msg_lines.append(f"**[📊 스캔 보고서]** 정예 종목 {len(data_store)}개 스캔 완료 (실패: {error_count}개)\n")
+msg_lines.append(f"**[📊 상태 보고]** 정예 종목 {len(data_store)}개 스캔 완료 | 활성 쿨다운: {len(cooldown_tracker)}종목\n")
 
 msg_lines.append("**[💼 현재 보유 포트폴리오]**")
 if not portfolio:
-    msg_lines.append("보유 중인 종목이 없습니다. (현금 100%)")
+    msg_lines.append("보유 중인 종목이 없습니다. (현금 대기 중)")
 else:
     for ticker, pos in portfolio.items():
         cp = prices_cache.get(ticker, pos.get('buy_price', 0))
@@ -474,8 +507,7 @@ else:
         ret = ((cp / bp) - 1) * 100 if bp > 0 else 0
         is_kr = pos.get('market', '').startswith('KR')
         sl_pct = FIXED_STOP_LOSS_KR if is_kr else FIXED_STOP_LOSS_US
-        sl_price = bp * (1 - sl_pct)
-        msg_lines.append(f"🔸 {pos.get('name')}: {fmt_price(bp, is_kr)} ➔ {fmt_price(cp, is_kr)} ({ret:+.2f}%) | SL: {fmt_price(sl_price, is_kr)}")
+        msg_lines.append(f"🔸 {pos.get('name')}: {fmt_price(bp, is_kr)} ➔ {fmt_price(cp, is_kr)} ({ret:+.2f}%) | 서버SL: {fmt_price(bp*(1-sl_pct), is_kr)}")
 
 final_content = "\n".join(msg_lines)
 if len(final_content) > 1900: final_content = final_content[:1850] + "\n\n... (글자수 제한으로 이하 생략)"
@@ -489,11 +521,18 @@ except Exception as e: print(f"🚨 디스코드 통신 에러: {e}")
 
 print("📡 구글 시트 데이터 전송 시도 중...")
 if SHEET_WEBHOOK_URL:
-    sheet_data = {"date": kr_time.strftime('%Y-%m-%d %H:%M:%S'), "message": f"진입 {len(buy_signals)}건, 청산 {len(sell_signals)}건", "dashboard": dashboard_list, "portfolio": portfolio}
+    sheet_data = {
+        "date": kr_time.strftime('%Y-%m-%d %H:%M:%S'), 
+        "message": f"자산 {int(total_bot_equity):,}원 / 진입 {len(buy_signals)}건", 
+        "dashboard": dashboard_list, 
+        "portfolio": portfolio,
+        "bot_cash": bot_cash,
+        "cooldown_tracker": cooldown_tracker 
+    }
     try: 
         req = requests.post(SHEET_WEBHOOK_URL, json=sheet_data, timeout=30)
         if req.status_code == 200: print("✅ 구글 시트 데이터 전송 성공!")
         else: print(f"⚠️ 구글 시트 전송 실패 (HTTP {req.status_code})")
     except Exception as e: print(f"🚨 구글 시트 통신 에러: {e}")
 
-print("🏁 봇 실행이 모두 완료되었습니다. (Exit Code 0)")
+print("🏁 봇 실행 완료 (Exit Code 0)")
