@@ -111,7 +111,7 @@ MAX_US_POSITIONS = 2
 POSITION_SIZE_RATIO = 0.25 # 총 자본의 25% (복리 적용)
 
 FIXED_STOP_LOSS_KR = 0.08  
-FIXED_STOP_LOSS_US = 0.08  
+FIXED_STOP_LOSS_US = 0.1  
 MAX_HOLD_DAYS = 20         
 
 buy_signals, sell_signals = [], []
