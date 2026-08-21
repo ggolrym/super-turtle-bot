@@ -113,7 +113,7 @@ MAX_KR_POSITIONS = 2
 MAX_US_POSITIONS = 2             
 
 FIXED_STOP_LOSS_KR = 0.08  
-FIXED_STOP_LOSS_US = 0.1   
+FIXED_STOP_LOSS_US = 0.08   
 MAX_HOLD_DAYS = 20         
 
 # 정밀 수수료 설정
