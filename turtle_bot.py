@@ -1,6 +1,6 @@
 # ==========================================
-# 🚀 AI 하이브리드 터틀 봇 V36.5 Safe Defender Live
-# (4슬롯 분산 / 정밀 수수료 / 스마트 익절 / 🌟 IP 밴 원천차단 안전수집)
+# 🚀 AI 하이브리드 터틀 봇 V36.6 Safe Defender Live
+# (4슬롯 분산 / 코스피 통합 방어막 패치 🌟 / 스마트 익절 / IP 밴 원천차단)
 # ==========================================
 import os
 import yfinance as yf
@@ -48,7 +48,7 @@ elif RUN_MARKET == 'US': target_market, market_title = 'US', "🇺🇸 미국장
 else: target_market, market_title = 'ALL', "🌐 통합장"
 
 print(f"⏰ 현재 한국시간: {kr_time.strftime('%Y-%m-%d %H:%M:%S')} (적용 환율: {EXCHANGE_RATE:,.1f}원)")
-print(f"🎯 V36.5 Safe Defender 가동 (4슬롯 분산 / 극강의 안전 수집 / {market_title})\n")
+print(f"🎯 V36.6 Safe Defender 가동 (4슬롯 분산 / 코스피 통합 방어막 / {market_title})\n")
 
 # 🌟 2. KIS API 통신 모듈
 def get_kis_token():
@@ -113,7 +113,7 @@ MAX_KR_POSITIONS = 2
 MAX_US_POSITIONS = 2             
 
 FIXED_STOP_LOSS_KR = 0.08  
-FIXED_STOP_LOSS_US = 0.1  
+FIXED_STOP_LOSS_US = 0.1   
 MAX_HOLD_DAYS = 20         
 
 # 정밀 수수료 설정
@@ -140,15 +140,15 @@ def check_macro_regime(index_ticker):
         return (curr_close >= ma20) and (curr_close >= ma50)
     except: return True
 
+# 💡 [패치 1] 코스닥 지수 수집 제거 및 코스피/미국장으로 통합
 macro_bull = {
-    'KR_KOSPI': check_macro_regime('KS11'),
-    'KR_KOSDAQ': check_macro_regime('KQ11'),
+    'KR': check_macro_regime('KS11'), # 한국장은 코스피 하나로 통합
     'US': check_macro_regime('^GSPC')
 }
 
 print(f"🛡️ 단기 방어막(MA20 & MA50) 상태:")
-print(f" - KR(코스피/코스닥): {'🟢 안전' if macro_bull['KR_KOSPI'] else '🔴 하락장 방어 중'} / {'🟢 안전' if macro_bull['KR_KOSDAQ'] else '🔴 하락장 방어 중'}")
-print(f" - US(S&P500): {'🟢 안전' if macro_bull['US'] else '🔴 하락장 방어 중'}\n")
+print(f" - KR(한국장 전체): {'🟢 안전' if macro_bull['KR'] else '🔴 하락장 방어 중'}")
+print(f" - US(미국장 전체): {'🟢 안전' if macro_bull['US'] else '🔴 하락장 방어 중'}\n")
 
 # DB 불러오기
 if SHEET_WEBHOOK_URL:
@@ -179,7 +179,7 @@ for t, expire_date in cooldown_tracker.items():
     except: pass
 cooldown_tracker = active_cooldowns
 
-# 잔고 이중 검증 및 서버 장중 손절 감지 (API 장애 시 장부 데이터 보존 기능 포함)
+# 잔고 이중 검증 및 서버 장중 손절 감지
 def sync_portfolio_with_kis_balance(current_portfolio):
     if not kis_token: return current_portfolio
     clean_account = KIS_ACCOUNT.replace("-", "")
@@ -223,7 +223,6 @@ def sync_portfolio_with_kis_balance(current_portfolio):
         clean_t = t.split('.')[0]
         is_kr = t.endswith('.KS') or t.endswith('.KQ')
         
-        # 실제 서버 잔고에는 없는데 장부에만 있다면? -> 서버에서 자동손절(-8%) 당한 것으로 간주하고 현금 복구
         if is_kr and kr_api_success and (clean_t not in kr_tickers and t not in kr_tickers):
             print(f"⚠️ {t} 잔고 없음 (장중 서버 자동손절 감지) ➔ 쿨다운 5일 적용")
             sell_signals.append(f"🔪 서버 장중 손절 감지: {p.get('name')} (현금 회수 완료)")
@@ -238,7 +237,6 @@ def sync_portfolio_with_kis_balance(current_portfolio):
             cooldown_tracker[t] = (kr_time + timedelta(days=5)).strftime('%Y-%m-%d')
             continue
             
-        # API 통신 실패 시 장부 데이터 무조건 보존
         if is_kr:
             if not kr_api_success: 
                 synced[t] = p
@@ -334,7 +332,6 @@ for ticker, (market, name, code) in all_stocks.items():
     try:
         stock_data = pd.DataFrame()
         if market.startswith('KR'):
-            # 💡 [안전수집] 한국장은 3회 재시도 + 0.1초 딜레이
             for _ in range(3):
                 try:
                     temp_data = fdr.DataReader(code.split('.')[0], start=fdr_start_date)
@@ -344,7 +341,6 @@ for ticker, (market, name, code) in all_stocks.items():
                 except: pass
                 time.sleep(0.1) 
         else:
-            # 💡 [안전수집] 야후 파이낸스는 IP 밴이 잦으므로 3회 재시도 + 0.3초 넉넉한 딜레이 부여
             ticker_obj = yf.Ticker(ticker)
             for _ in range(3):
                 try:
@@ -407,7 +403,6 @@ if kis_token:
         sl_pct = FIXED_STOP_LOSS_KR if is_kr else FIXED_STOP_LOSS_US
         sl_price = buy_price * (1.0 - sl_pct)
         
-        # 💡 [스마트 트레일링 익절] 미국주는 10% 이상 수익 시 MA10으로 익절라인 바짝 상향
         if is_kr:
             tp_ma = float(df['MA10'].iloc[-1])
         else:
@@ -446,7 +441,8 @@ if kis_token:
         if ticker in portfolio: continue
         market, name, _ = all_stocks[ticker]
         
-        m_key = 'KR_KOSPI' if market == 'KR_KOSPI' else ('KR_KOSDAQ' if market == 'KR_KOSDAQ' else 'US')
+        # 💡 [패치 2] 코스닥 종목이어도 무조건 코스피(KR) 방어막을 따르도록 강제 이식
+        m_key = 'US' if market == 'US' else 'KR'
         if not macro_bull.get(m_key, True): continue 
         
         curr_price = float(df['Close'].iloc[-1])
@@ -510,7 +506,7 @@ for ticker, pos in portfolio.items():
         "invested": round(bp * units, 2), "return_pct": round(ret_pct, 2), "stop_loss": round(sl_price, 2)
     })
 
-msg_lines = [f"🤖 **V36.5 Safe Defender Live (4슬롯/안전수집)** 🤖\n"]
+msg_lines = [f"🤖 **V36.6 Safe Defender Live (코스피 통합방어막)** 🤖\n"]
 msg_lines.append(f"💰 **추정 총자산:** 약 {int(total_bot_equity):,}원 (가용현금: {int(bot_cash):,}원)\n")
 
 if not kis_token:
