@@ -50,20 +50,33 @@ else: target_market, market_title = 'ALL', "🌐 통합장"
 print(f"⏰ 현재 한국시간: {kr_time.strftime('%Y-%m-%d %H:%M:%S')} (적용 환율: {EXCHANGE_RATE:,.1f}원)")
 print(f"🎯 V36.6 Safe Defender 가동 (4슬롯 분산 / 극강의 안전 수집 / {market_title})\n")
 
-# 🌟 2. KIS API 통신 모듈
+# 🌟 2. KIS API 통신 모듈 (💡 디버깅 및 에러 상세 출력 패치 적용)
 def get_kis_token():
+    # 실전투자 / 모의투자 URL 확인을 위한 로그 출력
+    is_mock = "vts" in KIS_URL
+    print(f"🔌 통신 서버: {'모의투자' if is_mock else '실전투자'} ({KIS_URL})")
+
     url = f"{KIS_URL}/oauth2/tokenP"
     headers = {"content-type": "application/json"}
     body = {"grant_type": "client_credentials", "appkey": KIS_APP_KEY, "appsecret": KIS_APP_SECRET}
     
-    # 💡 [버그 픽스] 타임아웃 30초 연장 및 3회 재시도 로직 적용
     for attempt in range(3):
         try:
             res = requests.post(url, headers=headers, data=json.dumps(body), timeout=30)
+            
             if res.status_code == 200:
                 return res.json().get("access_token")
+            else:
+                # 💡 침묵의 에러 해결: 서버가 반환한 진짜 에러 메시지를 강제로 출력합니다.
+                error_msg = res.json().get('error_description', res.text)
+                print(f"⚠️ 토큰 거절 ({res.status_code}) - 사유: {error_msg}")
+                time.sleep(2)
+                
+        except requests.exceptions.Timeout:
+            print(f"⚠️ 통신 타임아웃 ({attempt+1}차 시도) - 서버가 30초 내에 응답하지 않습니다.")
+            time.sleep(2)
         except Exception as e: 
-            print(f"⚠️ 토큰 발급 에러 ({attempt+1}차 시도): {e}")
+            print(f"⚠️ 네트워크 에러 ({attempt+1}차 시도): {e}")
             time.sleep(2)
             
     return None
@@ -119,7 +132,7 @@ MAX_KR_POSITIONS = 2
 MAX_US_POSITIONS = 2             
 
 FIXED_STOP_LOSS_KR = 0.08  
-FIXED_STOP_LOSS_US = 0.08   
+FIXED_STOP_LOSS_US = 0.1   
 MAX_HOLD_DAYS = 20         
 
 # 정밀 수수료 설정
