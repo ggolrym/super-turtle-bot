@@ -48,22 +48,28 @@ elif RUN_MARKET == 'US': target_market, market_title = 'US', "🇺🇸 미국장
 else: target_market, market_title = 'ALL', "🌐 통합장"
 
 print(f"⏰ 현재 한국시간: {kr_time.strftime('%Y-%m-%d %H:%M:%S')} (적용 환율: {EXCHANGE_RATE:,.1f}원)")
-print(f"🎯 V36.6 Safe Defender 가동 (4슬롯 분산 / 코스피 통합 방어막 / {market_title})\n")
+print(f"🎯 V36.6 Safe Defender 가동 (4슬롯 분산 / 극강의 안전 수집 / {market_title})\n")
 
 # 🌟 2. KIS API 통신 모듈
 def get_kis_token():
     url = f"{KIS_URL}/oauth2/tokenP"
     headers = {"content-type": "application/json"}
     body = {"grant_type": "client_credentials", "appkey": KIS_APP_KEY, "appsecret": KIS_APP_SECRET}
-    try:
-        res = requests.post(url, headers=headers, data=json.dumps(body), timeout=10)
-        return res.json().get("access_token") if res.status_code == 200 else None
-    except Exception as e: 
-        print(f"⚠️ 토큰 발급 에러: {e}")
-        return None
+    
+    # 💡 [버그 픽스] 타임아웃 30초 연장 및 3회 재시도 로직 적용
+    for attempt in range(3):
+        try:
+            res = requests.post(url, headers=headers, data=json.dumps(body), timeout=30)
+            if res.status_code == 200:
+                return res.json().get("access_token")
+        except Exception as e: 
+            print(f"⚠️ 토큰 발급 에러 ({attempt+1}차 시도): {e}")
+            time.sleep(2)
+            
+    return None
 
 kis_token = get_kis_token()
-print("✅ KIS 토큰 발급 완료!" if kis_token else "❌ KIS 토큰 발급 실패. 임무를 보류합니다.")
+print("✅ KIS 토큰 발급 완료!" if kis_token else "❌ KIS 토큰 발급 3회 실패. 임무를 보류합니다.")
 
 def execute_order(ticker, qty, side="BUY", price=0.0):
     if not kis_token: return {"success": False, "msg": "토큰 없음"}
@@ -378,6 +384,13 @@ print(f"✅ 안전 스캔 완료! (성공: {len(data_store)}개 / 실패: {error
 kr_candidates, us_candidates = [], []
 def fmt_price(p, is_kr): return f"{p:,.0f}" if is_kr else f"{p:,.2f}"
 
+# 💡 [버그 픽스] API 통신이 끊겨도 디스코드로 자산 보고를 할 수 있게 밖으로 빼냅니다.
+current_portfolio_value = sum(
+    p['units'] * prices_cache.get(t, p.get('buy_price', 0)) * (1 if str(p.get('market', '')).startswith('KR') else EXCHANGE_RATE) 
+    for t, p in portfolio.items()
+)
+total_bot_equity = bot_cash + current_portfolio_value
+
 if kis_token:
     # -----------------------------------
     # [A] 매도 심사 (스마트 트레일링 익절 탑재)
@@ -432,9 +445,6 @@ if kis_token:
     # -----------------------------------
     # [B] 매수 심사
     # -----------------------------------
-    current_portfolio_value = sum(p['units'] * prices_cache[t] * (1 if str(p.get('market', '')).startswith('KR') else EXCHANGE_RATE) for t, p in portfolio.items() if t in prices_cache)
-    
-    total_bot_equity = bot_cash + current_portfolio_value
     target_pos_size_krw = total_bot_equity * POSITION_SIZE_RATIO 
     
     for ticker, df in data_store.items():
