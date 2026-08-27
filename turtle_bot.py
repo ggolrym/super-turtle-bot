@@ -50,7 +50,7 @@ else: target_market, market_title = 'ALL', "🌐 통합장"
 print(f"⏰ 현재 한국시간: {kr_time.strftime('%Y-%m-%d %H:%M:%S')} (적용 환율: {EXCHANGE_RATE:,.1f}원)")
 print(f"🎯 V36.6 Safe Defender 가동 (4슬롯 분산 / 극강의 안전 수집 / {market_title})\n")
 
-# 🌟 2. KIS API 통신 모듈 (💡 디버깅 및 에러 상세 출력 패치 적용)
+# 🌟 2. KIS API 통신 모듈
 def get_kis_token():
     # 실전투자 / 모의투자 URL 확인을 위한 로그 출력
     is_mock = "vts" in KIS_URL
@@ -60,18 +60,16 @@ def get_kis_token():
     headers = {"content-type": "application/json"}
     body = {"grant_type": "client_credentials", "appkey": KIS_APP_KEY, "appsecret": KIS_APP_SECRET}
     
+    # 💡 [버그 픽스] 타임아웃 30초 연장 및 3회 재시도 로직 적용
     for attempt in range(3):
         try:
             res = requests.post(url, headers=headers, data=json.dumps(body), timeout=30)
-            
             if res.status_code == 200:
                 return res.json().get("access_token")
             else:
-                # 💡 침묵의 에러 해결: 서버가 반환한 진짜 에러 메시지를 강제로 출력합니다.
                 error_msg = res.json().get('error_description', res.text)
                 print(f"⚠️ 토큰 거절 ({res.status_code}) - 사유: {error_msg}")
                 time.sleep(2)
-                
         except requests.exceptions.Timeout:
             print(f"⚠️ 통신 타임아웃 ({attempt+1}차 시도) - 서버가 30초 내에 응답하지 않습니다.")
             time.sleep(2)
@@ -132,7 +130,7 @@ MAX_KR_POSITIONS = 2
 MAX_US_POSITIONS = 2             
 
 FIXED_STOP_LOSS_KR = 0.08  
-FIXED_STOP_LOSS_US = 0.1   
+FIXED_STOP_LOSS_US = 0.08   
 MAX_HOLD_DAYS = 20         
 
 # 정밀 수수료 설정
@@ -513,20 +511,31 @@ if kis_token:
             else: current_us_positions += 1
 
 # ==========================================
-# 🌟 6. 시트 데이터 생성 및 디스코드 발송
+# 🌟 6. 시트 데이터 생성 및 디스코드 발송 (💡 익절선/손절선 가시화 패치)
 # ==========================================
 for ticker, pos in portfolio.items():
     cp = prices_cache.get(ticker, pos.get('buy_price', 0))
     bp = pos.get('buy_price', 0)
     units = pos.get('units', 0)
     ret_pct = ((cp / bp) - 1) * 100 if bp > 0 else 0
-    sl_pct = FIXED_STOP_LOSS_KR if pos.get('market', '').startswith('KR') else FIXED_STOP_LOSS_US
+    is_kr = pos.get('market', '').startswith('KR')
+    sl_pct = FIXED_STOP_LOSS_KR if is_kr else FIXED_STOP_LOSS_US
     sl_price = bp * (1 - sl_pct)
+    
+    # 💡 [신규 추가] 추세 이탈선 (스마트 익절선: MA10 / MA20) 가격 추출
+    trend_exit_price = 0
+    if ticker in data_store:
+        df_ticker = data_store[ticker]
+        if is_kr:
+            trend_exit_price = float(df_ticker['MA10'].iloc[-1])
+        else:
+            trend_exit_price = float(df_ticker['MA10'].iloc[-1]) if ret_pct >= 10.0 else float(df_ticker['MA20'].iloc[-1])
     
     dashboard_list.append({
         "name": pos.get('name', ticker), "units": units, 
         "buy_price": round(bp, 2), "current_price": round(cp, 2), 
-        "invested": round(bp * units, 2), "return_pct": round(ret_pct, 2), "stop_loss": round(sl_price, 2)
+        "invested": round(bp * units, 2), "return_pct": round(ret_pct, 2), "stop_loss": round(sl_price, 2),
+        "trend_exit": round(trend_exit_price, 2) # 💡 구글 시트로 보낼 JSON에 'trend_exit' 데이터 추가
     })
 
 msg_lines = [f"🤖 **V36.6 Safe Defender Live (코스피 통합방어막)** 🤖\n"]
@@ -559,7 +568,15 @@ else:
         ret = ((cp / bp) - 1) * 100 if bp > 0 else 0
         is_kr = pos.get('market', '').startswith('KR')
         sl_pct = FIXED_STOP_LOSS_KR if is_kr else FIXED_STOP_LOSS_US
-        msg_lines.append(f"🔸 {pos.get('name')}: {fmt_price(bp, is_kr)} ➔ {fmt_price(cp, is_kr)} ({ret:+.2f}%) | 서버SL: {fmt_price(bp*(1-sl_pct), is_kr)}")
+        
+        # 💡 [신규 추가] 디스코드에도 익절선/손절선 명확히 표시
+        trend_exit_price = 0
+        if ticker in data_store:
+            df_ticker = data_store[ticker]
+            trend_exit_price = float(df_ticker['MA10'].iloc[-1]) if is_kr else (float(df_ticker['MA10'].iloc[-1]) if ret >= 10.0 else float(df_ticker['MA20'].iloc[-1]))
+
+        msg_lines.append(f"🔸 {pos.get('name')}: {fmt_price(bp, is_kr)} ➔ {fmt_price(cp, is_kr)} ({ret:+.2f}%)")
+        msg_lines.append(f"   ↳ 🛡️하드스탑: {fmt_price(bp*(1-sl_pct), is_kr)} | 🏃‍♂️익절선: {fmt_price(trend_exit_price, is_kr)}")
 
 final_content = "\n".join(msg_lines)
 if len(final_content) > 1900: final_content = final_content[:1850] + "\n\n... (글자수 제한으로 이하 생략)"
