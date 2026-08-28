@@ -1,6 +1,6 @@
 # ==========================================
 # 🚀 AI 하이브리드 터틀 봇 V36.6 Safe Defender Live
-# (4슬롯 분산 / 코스피 통합 방어막 패치 🌟 / 스마트 익절 / IP 밴 원천차단)
+# (4슬롯 분산 / 코스닥 통합 방어막 패치 🌟 / 스마트 익절 / IP 밴 원천차단)
 # ==========================================
 import os
 import yfinance as yf
@@ -157,9 +157,9 @@ def check_macro_regime(index_ticker):
         return (curr_close >= ma20) and (curr_close >= ma50)
     except: return True
 
-# 💡 [패치 1] 코스닥 지수 수집 제거 및 코스피/미국장으로 통합
+# 💡 [패치 1] 코스피(KS11) 대신 코스닥(KQ11) 지수를 한국장 통합 방어막으로 교체
 macro_bull = {
-    'KR': check_macro_regime('KS11'), # 한국장은 코스피 하나로 통합
+    'KR': check_macro_regime('KQ11'), # 한국장은 코스닥 하나로 통합
     'US': check_macro_regime('^GSPC')
 }
 
@@ -462,7 +462,7 @@ if kis_token:
         if ticker in portfolio: continue
         market, name, _ = all_stocks[ticker]
         
-        # 💡 [패치 2] 코스닥 종목이어도 무조건 코스피(KR) 방어막을 따르도록 강제 이식
+        # 💡 [패치 2] 코스닥 종목이어도 무조건 코스피/코스닥 방어막을 따르도록 (현재 KQ11 셋팅)
         m_key = 'US' if market == 'US' else 'KR'
         if not macro_bull.get(m_key, True): continue 
         
@@ -538,7 +538,7 @@ for ticker, pos in portfolio.items():
         "trend_exit": round(trend_exit_price, 2) # 💡 구글 시트로 보낼 JSON에 'trend_exit' 데이터 추가
     })
 
-msg_lines = [f"🤖 **V36.6 Safe Defender Live (코스피 통합방어막)** 🤖\n"]
+msg_lines = [f"🤖 **V36.6 Safe Defender Live (코스닥 통합방어막)** 🤖\n"]
 msg_lines.append(f"💰 **추정 총자산:** 약 {int(total_bot_equity):,}원 (가용현금: {int(bot_cash):,}원)\n")
 
 if not kis_token:
