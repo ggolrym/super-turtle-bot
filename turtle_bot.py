@@ -384,7 +384,8 @@ for ticker, (market, name, code) in all_stocks.items():
         stock_data['Recent20High'] = stock_data['High'].rolling(20).max().shift(1)
         
         data_store[ticker] = stock_data.dropna()
-        prices_cache[ticker] = float(stock_data['Close'].iloc[-1])
+        # 💡 [버그 픽스] 결측치(NaN)가 완벽히 제거된 data_store에서 안전하게 현재가를 가져옵니다.
+        prices_cache[ticker] = float(data_store[ticker]['Close'].iloc[-1]) 
         
     except: 
         error_count += 1
