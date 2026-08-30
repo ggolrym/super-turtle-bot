@@ -22,7 +22,7 @@ jobs:
       - run: pip install yfinance pandas finance-datareader requests google-genai pytz
       - run: python turtle_bot.py
         env:
-          RUN_MARKET: KOSPI
+          RUN_MARKET: KOSDAQ
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           KIS_APP_KEY: ${{ secrets.KIS_APP_KEY }}
