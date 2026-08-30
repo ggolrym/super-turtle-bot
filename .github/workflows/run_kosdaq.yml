@@ -1,4 +1,4 @@
-name: 🇰🇷 KOSPI Bot
+name: 🇰🇷 KOSDAQ Bot
 
 on:
   schedule:
