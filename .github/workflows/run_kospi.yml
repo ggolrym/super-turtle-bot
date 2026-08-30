@@ -2,17 +2,17 @@ name: 🇰🇷 KOSPI Bot
 
 on:
   schedule:
-    # 한국시간 15:10 목표 (약 3시간 15분 지연 감안하여 UTC 02:35 예약)
-    - cron: '35 7 * * *'
+    - cron: '05 6 * * 1-5' # KST 15:05 실행
   workflow_dispatch:
 
 concurrency:
   group: turtle-bot-run
-  cancel-in-progress: false
+  cancel-in-progress: true # 💡 [수정] 이전 작업이 멈춰있으면 자비 없이 강제 취소
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+    timeout-minutes: 10 # 💡 [추가] 코드가 10분 이상 멈춰있으면 자동 에러 처리 (6시간 지연 방지)
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-python@v4
