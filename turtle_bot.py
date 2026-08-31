@@ -1,6 +1,6 @@
 # ==========================================
 # 🚀 AI 하이브리드 터틀 봇 V36.6 Safe Defender Live
-# (4슬롯 분산 / 코스닥 통합 방어막 패치 🌟 / 스마트 익절 / IP 밴 원천차단)
+# (4슬롯 분산 / 코스닥 통합 방어막 패치 🌟 / 스마트 익절 / 2026 세법 0.2% 단일화 / 연말 절세 탑재)
 # ==========================================
 import os
 import yfinance as yf
@@ -52,7 +52,6 @@ print(f"🎯 V36.6 Safe Defender 가동 (4슬롯 분산 / 극강의 안전 수�
 
 # 🌟 2. KIS API 통신 모듈
 def get_kis_token():
-    # 실전투자 / 모의투자 URL 확인을 위한 로그 출력
     is_mock = "vts" in KIS_URL
     print(f"🔌 통신 서버: {'모의투자' if is_mock else '실전투자'} ({KIS_URL})")
 
@@ -60,7 +59,6 @@ def get_kis_token():
     headers = {"content-type": "application/json"}
     body = {"grant_type": "client_credentials", "appkey": KIS_APP_KEY, "appsecret": KIS_APP_SECRET}
     
-    # 💡 [버그 픽스] 타임아웃 30초 연장 및 3회 재시도 로직 적용
     for attempt in range(3):
         try:
             res = requests.post(url, headers=headers, data=json.dumps(body), timeout=30)
@@ -125,6 +123,7 @@ def execute_order(ticker, qty, side="BUY", price=0.0):
 # ==========================================
 INITIAL_CAPITAL = 500000         
 POSITION_SIZE_RATIO = 0.25       # 4슬롯 분산
+MAX_PRICE_LIMIT = 130000         # 💡 매수 상한선: 1주당 13만 원 이하 종목만 매수
 MAX_POSITIONS = 4                
 MAX_KR_POSITIONS = 2             
 MAX_US_POSITIONS = 2             
@@ -133,17 +132,24 @@ FIXED_STOP_LOSS_KR = 0.08
 FIXED_STOP_LOSS_US = 0.08   
 MAX_HOLD_DAYS = 20         
 
-# 정밀 수수료 설정
+# 💡 [2026년 기준] 정밀 수수료 및 거래세 (코스피/코스닥 0.20% 단일화)
 KR_FEE = 0.00015
-KR_TAX = 0.0018
+KR_KOSPI_TAX = 0.0020            # 코스피 증권거래세 0.20%
+KR_KOSDAQ_TAX = 0.0020           # 코스닥 증권거래세 0.20%
 US_FEE = 0.0025        
 US_SEC_FEE = 0.0000206 
+US_CGT_RATE = 0.22               # 미국주식 양도소득세율 22%
+US_CGT_DEDUCTION = 2500000       # 연간 기본공제 250만 원
 
 buy_signals, sell_signals = [], []
 dashboard_list = [] 
 portfolio = {}
 bot_cash = INITIAL_CAPITAL 
 cooldown_tracker = {} 
+
+# 연말 절세를 위한 실현 수익 트래커
+yearly_us_profit = 0
+current_year = kr_time.year
 
 # 단기 매크로 서킷브레이커 (MA20 & MA50 동시 충족)
 def check_macro_regime(index_ticker):
@@ -157,9 +163,8 @@ def check_macro_regime(index_ticker):
         return (curr_close >= ma20) and (curr_close >= ma50)
     except: return True
 
-# 💡 [패치 1] 코스피(KS11) 대신 코스닥(KQ11) 지수를 한국장 통합 방어막으로 교체
 macro_bull = {
-    'KR': check_macro_regime('KQ11'), # 한국장은 코스닥 하나로 통합
+    'KR': check_macro_regime('KQ11'),
     'US': check_macro_regime('^GSPC')
 }
 
@@ -179,6 +184,14 @@ if SHEET_WEBHOOK_URL:
                     if isinstance(data, dict): 
                         portfolio = data.get('portfolio', data) 
                         cooldown_tracker = data.get('cooldown_tracker', {})
+                        
+                        # 연말 절세를 위한 데이터 복원 및 연도 초기화
+                        saved_year = data.get('current_year', current_year)
+                        if saved_year == current_year:
+                            yearly_us_profit = float(data.get('yearly_us_profit', 0))
+                        else:
+                            yearly_us_profit = 0 # 해가 바뀌면 한도 리셋
+                            
                         if 'bot_cash' in data: 
                             bot_cash = float(data['bot_cash'])
                         else:
@@ -243,7 +256,8 @@ def sync_portfolio_with_kis_balance(current_portfolio):
         if is_kr and kr_api_success and (clean_t not in kr_tickers and t not in kr_tickers):
             print(f"⚠️ {t} 잔고 없음 (장중 서버 자동손절 감지) ➔ 쿨다운 5일 적용")
             sell_signals.append(f"🔪 서버 장중 손절 감지: {p.get('name')} (현금 회수 완료)")
-            bot_cash += (p['units'] * p['buy_price'] * (1 - FIXED_STOP_LOSS_KR) * (1 - KR_FEE - KR_TAX))
+            applied_kr_tax = KR_KOSPI_TAX if t.endswith('.KS') else KR_KOSDAQ_TAX
+            bot_cash += (p['units'] * p['buy_price'] * (1 - FIXED_STOP_LOSS_KR) * (1 - KR_FEE - applied_kr_tax))
             cooldown_tracker[t] = (kr_time + timedelta(days=5)).strftime('%Y-%m-%d')
             continue
             
@@ -335,13 +349,13 @@ for t in portfolio.keys():
         all_stocks[t] = (m, portfolio[t].get('name', t), t)
 
 # ==========================================
-# 🌟 5. 지표 계산 및 거래 판단 (💡 IP 밴 원천차단 안전수집 로직)
+# 🌟 5. 지표 계산 및 거래 판단
 # ==========================================
 data_store, prices_cache = {}, {}
 fdr_start_date = (kr_time - timedelta(days=250)).strftime('%Y-%m-%d')
 error_count = 0
 
-print(f"⚡ 전체 시장 데이터({len(all_stocks)}개) 100% 안전 스캔 중... (API 보호를 위해 시간이 소요됩니다)")
+print(f"⚡ 전체 시장 데이터({len(all_stocks)}개) 100% 안전 스캔 중...")
 
 for ticker, (market, name, code) in all_stocks.items():
     if ticker in cooldown_tracker and ticker not in portfolio: continue
@@ -384,7 +398,6 @@ for ticker, (market, name, code) in all_stocks.items():
         stock_data['Recent20High'] = stock_data['High'].rolling(20).max().shift(1)
         
         data_store[ticker] = stock_data.dropna()
-        # 💡 [버그 픽스] 결측치(NaN)가 완벽히 제거된 data_store에서 안전하게 현재가를 가져옵니다.
         prices_cache[ticker] = float(data_store[ticker]['Close'].iloc[-1]) 
         
     except: 
@@ -396,7 +409,6 @@ print(f"✅ 안전 스캔 완료! (성공: {len(data_store)}개 / 실패: {error
 kr_candidates, us_candidates = [], []
 def fmt_price(p, is_kr): return f"{p:,.0f}" if is_kr else f"{p:,.2f}"
 
-# 💡 [버그 픽스] API 통신이 끊겨도 디스코드로 자산 보고를 할 수 있게 밖으로 빼냅니다.
 current_portfolio_value = sum(
     p['units'] * prices_cache.get(t, p.get('buy_price', 0)) * (1 if str(p.get('market', '')).startswith('KR') else EXCHANGE_RATE) 
     for t, p in portfolio.items()
@@ -404,6 +416,52 @@ current_portfolio_value = sum(
 total_bot_equity = bot_cash + current_portfolio_value
 
 if kis_token:
+    
+    # -----------------------------------
+    # 💡 [특별 심사] 실전 연말 미국 주식 절세 (Tax Harvesting) 로직
+    # -----------------------------------
+    if kr_time.month == 12 and kr_time.day >= 24:
+        rem_deduct = US_CGT_DEDUCTION - yearly_us_profit
+        if rem_deduct > 0:
+            for ticker in list(portfolio.keys()):
+                if portfolio[ticker].get('market') != 'US': continue
+                if ticker not in data_store: continue
+                
+                df = data_store[ticker]
+                curr_price = float(df['Close'].iloc[-1])
+                pos = portfolio[ticker]
+                
+                buy_price = float(pos.get('buy_price', 0))
+                if buy_price <= 0: continue
+                
+                net_sell_price_per_share = curr_price * (1 - US_FEE - US_SEC_FEE) * EXCHANGE_RATE
+                cost_per_share = buy_price * (1 + US_FEE) * EXCHANGE_RATE 
+                profit_per_share = net_sell_price_per_share - cost_per_share
+                
+                if profit_per_share > 0:
+                    shares_to_sell = min(pos['units'], math.floor(rem_deduct / profit_per_share))
+                    
+                    if shares_to_sell > 0:
+                        res = execute_order(ticker, shares_to_sell, side="SELL", price=curr_price)
+                        if res['success']:
+                            sell_amt = shares_to_sell * curr_price * EXCHANGE_RATE
+                            net_sell_amt = sell_amt * (1 - US_FEE - US_SEC_FEE)
+                            realized_profit = shares_to_sell * profit_per_share
+                            
+                            bot_cash += net_sell_amt
+                            yearly_us_profit += realized_profit
+                            rem_deduct -= realized_profit
+                            
+                            sell_signals.append(f"🌟 연말 절세 실현: {pos['name']} | {shares_to_sell}주 익절매도 (공제활용: +{realized_profit:,.0f}원)")
+                            
+                            if shares_to_sell == pos['units']:
+                                current_us_positions -= 1
+                                del portfolio[ticker]
+                            else:
+                                portfolio[ticker]['units'] -= shares_to_sell
+                                
+                            if rem_deduct <= 0: break
+
     # -----------------------------------
     # [A] 매도 심사 (스마트 트레일링 익절 탑재)
     # -----------------------------------
@@ -447,9 +505,16 @@ if kis_token:
                 sell_signals.append(f"🔴 청산: {name} | 사유: {sell_reason} | 수익: {profit_pct*100:+.2f}%")
                 
                 sell_amt = pos['units'] * curr_price * (1 if is_kr else EXCHANGE_RATE)
-                fee_deduct = (KR_FEE + KR_TAX) if is_kr else (US_FEE + US_SEC_FEE)
+                applied_kr_tax = KR_KOSPI_TAX if market == 'KR_KOSPI' else KR_KOSDAQ_TAX
+                fee_deduct = (KR_FEE + applied_kr_tax) if is_kr else (US_FEE + US_SEC_FEE)
                 bot_cash += sell_amt * (1 - fee_deduct) 
                 
+                if not is_kr:
+                    net_sell_price_per_share = curr_price * (1 - US_FEE - US_SEC_FEE) * EXCHANGE_RATE
+                    cost_per_share = buy_price * (1 + US_FEE) * EXCHANGE_RATE
+                    realized_trade_profit = pos['units'] * (net_sell_price_per_share - cost_per_share)
+                    yearly_us_profit += realized_trade_profit
+
                 if is_kr: current_kr_positions -= 1
                 else: current_us_positions -= 1
                 del portfolio[ticker] 
@@ -463,13 +528,15 @@ if kis_token:
         if ticker in portfolio: continue
         market, name, _ = all_stocks[ticker]
         
-        # 💡 [패치 2] 코스닥 종목이어도 무조건 코스피/코스닥 방어막을 따르도록 (현재 KQ11 셋팅)
         m_key = 'US' if market == 'US' else 'KR'
         if not macro_bull.get(m_key, True): continue 
         
         curr_price = float(df['Close'].iloc[-1])
         is_kr = market.startswith('KR')
         krw_price = curr_price if is_kr else curr_price * EXCHANGE_RATE
+        
+        # 💡 매수 상한선 필터링
+        if krw_price > MAX_PRICE_LIMIT: continue 
         
         if krw_price > target_pos_size_krw: continue
         unit_size = math.floor(target_pos_size_krw / krw_price)
@@ -504,7 +571,6 @@ if kis_token:
                 'name': cand['name'], 'units': cand['units'], 'buy_price': cand['price'], 
                 'market': cand['market'], 'buy_date': today_str, 'hold_days': 0
             }
-            # 💡 매수 정밀 수수료 적용
             fee_add = KR_FEE if is_kr else US_FEE
             bot_cash -= (tot_amt * (1 + fee_add)) 
             
@@ -512,7 +578,7 @@ if kis_token:
             else: current_us_positions += 1
 
 # ==========================================
-# 🌟 6. 시트 데이터 생성 및 디스코드 발송 (💡 익절선/손절선 가시화 패치)
+# 🌟 6. 시트 데이터 생성 및 디스코드 발송
 # ==========================================
 for ticker, pos in portfolio.items():
     cp = prices_cache.get(ticker, pos.get('buy_price', 0))
@@ -523,7 +589,6 @@ for ticker, pos in portfolio.items():
     sl_pct = FIXED_STOP_LOSS_KR if is_kr else FIXED_STOP_LOSS_US
     sl_price = bp * (1 - sl_pct)
     
-    # 💡 [신규 추가] 추세 이탈선 (스마트 익절선: MA10 / MA20) 가격 추출
     trend_exit_price = 0
     if ticker in data_store:
         df_ticker = data_store[ticker]
@@ -536,11 +601,12 @@ for ticker, pos in portfolio.items():
         "name": pos.get('name', ticker), "units": units, 
         "buy_price": round(bp, 2), "current_price": round(cp, 2), 
         "invested": round(bp * units, 2), "return_pct": round(ret_pct, 2), "stop_loss": round(sl_price, 2),
-        "trend_exit": round(trend_exit_price, 2) # 💡 구글 시트로 보낼 JSON에 'trend_exit' 데이터 추가
+        "trend_exit": round(trend_exit_price, 2)
     })
 
-msg_lines = [f"🤖 **V36.6 Safe Defender Live (코스닥 통합방어막)** 🤖\n"]
-msg_lines.append(f"💰 **추정 총자산:** 약 {int(total_bot_equity):,}원 (가용현금: {int(bot_cash):,}원)\n")
+msg_lines = [f"🤖 **V36.6 Safe Defender Live (코스닥 통합방어막 & 절세 봇)** 🤖\n"]
+msg_lines.append(f"💰 **추정 총자산:** 약 {int(total_bot_equity):,}원 (가용현금: {int(bot_cash):,}원)")
+msg_lines.append(f"🇺🇸 금년도 미국주식 실현수익: {int(yearly_us_profit):,}원 (비과세 한도 250만 원)\n")
 
 if not kis_token:
     msg_lines.append(f"🚨 **시스템 경보:** API 토큰 발급 실패")
@@ -570,7 +636,6 @@ else:
         is_kr = pos.get('market', '').startswith('KR')
         sl_pct = FIXED_STOP_LOSS_KR if is_kr else FIXED_STOP_LOSS_US
         
-        # 💡 [신규 추가] 디스코드에도 익절선/손절선 명확히 표시
         trend_exit_price = 0
         if ticker in data_store:
             df_ticker = data_store[ticker]
@@ -597,7 +662,9 @@ if SHEET_WEBHOOK_URL:
         "dashboard": dashboard_list, 
         "portfolio": portfolio,
         "bot_cash": bot_cash,
-        "cooldown_tracker": cooldown_tracker 
+        "cooldown_tracker": cooldown_tracker,
+        "yearly_us_profit": yearly_us_profit,
+        "current_year": current_year
     }
     try: 
         req = requests.post(SHEET_WEBHOOK_URL, json=sheet_data, timeout=30)
