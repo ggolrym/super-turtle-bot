@@ -1,6 +1,6 @@
 # ==========================================
 # 🚀 AI 하이브리드 터틀 봇 V36.6 Safe Defender Live
-# (4슬롯 분산 / 코스닥 통합 방어막 / 2026 세법 0.2% / 연말 절세 / KRX 풀스캔 우회 & 스텔스 🛡️)
+# (4슬롯 분산 / 코스닥 통합 방어막 / 2026 세법 0.2% / 연말 절세 / KRX 풀스캔 무한순회 & 스텔스 🛡️)
 # ==========================================
 import os
 import yfinance as yf
@@ -299,7 +299,7 @@ current_kr_positions = sum(1 for p in portfolio.values() if isinstance(p, dict) 
 current_us_positions = sum(1 for p in portfolio.values() if isinstance(p, dict) and p.get('market') == 'US')
 
 # ==========================================
-# 🌟 4. 거래대금 필터링 & 유니버스 구축 (💡 KRX 방화벽 우회 & 전 종목 스텔스 패치 적용)
+# 🌟 4. 거래대금 필터링 & 유니버스 구축 (💡 전 종목 무한 순회 스캔 적용)
 # ==========================================
 MIN_TURNOVER_KRW = 10000000000 
 MIN_PRICE_KRW = 1000           
@@ -307,19 +307,21 @@ all_stocks = {}
 
 print(f"⏳ 유니버스 사전 필터링 중... ({market_title})")
 
-def get_naver_full_universe(sosok, suffix, market_tag):
+# 💡 네이버 금융 전 종목 크롤링 (페이지가 끝날 때까지 무한 순회)
+def get_naver_universe(sosok, suffix, market_tag):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
     
-    # 코스피(sosok=0): 최대 50페이지, 코스닥(sosok=1): 최대 40페이지 전수 조사
+    # 코스피(sosok=0)는 최대 50페이지, 코스닥(sosok=1)은 최대 40페이지까지 순회
     max_pages = 50 if sosok == 0 else 40
     collected_count = 0
     
-    for page in range(1, max_pages + 1):
+    for page in range(1, max_pages + 1): 
         try:
             url = f"https://finance.naver.com/sise/sise_market_sum.naver?sosok={sosok}&page={page}"
             res = requests.get(url, headers=headers, timeout=10)
-            
             matches = re.findall(r'href="/item/main\.naver\?code=(\d{6})" class="tltle">(.*?)</a>', res.text)
+            
+            # 💡 [핵심] 더 이상 긁어올 종목이 없는 빈 페이지가 나오면 자동으로 스캔 종료
             if not matches:
                 break
                 
@@ -327,19 +329,18 @@ def get_naver_full_universe(sosok, suffix, market_tag):
                 full_code = f"{code}{suffix}"
                 all_stocks[full_code] = (market_tag, name, full_code)
                 collected_count += 1
-                
-            # 💡 [휴먼 패치] 페이지 전환 간격 (0.1 ~ 0.3초 무작위 스텔스 딜레이)
-            time.sleep(random.uniform(0.1, 0.3))
+            
+            time.sleep(random.uniform(0.1, 0.3)) # 스텔스 딜레이
         except Exception:
-            continue
+            pass
             
     print(f"📦 [{market_tag}] 네이버 전체 페이지 스캔 완료: 총 {collected_count}개 종목 등록")
 
 if target_market in ['KR_KOSPI', 'ALL']:
-    get_naver_full_universe(0, '.KS', 'KR_KOSPI')
+    get_naver_universe(0, '.KS', 'KR_KOSPI')
 
 if target_market in ['KR_KOSDAQ', 'ALL']:
-    get_naver_full_universe(1, '.KQ', 'KR_KOSDAQ')
+    get_naver_universe(1, '.KQ', 'KR_KOSDAQ')
 
 special_tickers = {'BRKB': 'BRK-B', 'BFB': 'BF-B'}
 if target_market in ['US', 'ALL']:
@@ -368,7 +369,7 @@ data_store, prices_cache = {}, {}
 fdr_start_date = (kr_time - timedelta(days=250)).strftime('%Y-%m-%d')
 error_count = 0
 
-print(f"⚡ 전체 시장 데이터({len(all_stocks)}개) 스텔스 스캔 중... (휴먼 모드 가동)")
+print(f"⚡ 전체 시장 데이터({len(all_stocks)}개) 스텔스 풀스캔 중... (휴먼 모드 가동)")
 
 # 💡 [휴먼 패치] 스캔할 종목 리스트의 순서를 무작위로 섞어서 봇의 기계적 패턴을 파괴합니다.
 shuffled_stocks = list(all_stocks.items())
@@ -696,4 +697,4 @@ if SHEET_WEBHOOK_URL:
         else: print(f"⚠️ 구글 시트 전송 실패 (HTTP {req.status_code})")
     except Exception as e: print(f"🚨 구글 시트 통신 에러: {e}")
 
-print("🏁 봇 실행 완료 (Exit Code 0)") 여기에 한국장 유니버스 스캔시 코스피 200위 코스닥 200위까지 짤라서 설정하는 기능이 있는지 확인한다.
+print("🏁 봇 실행 완료 (Exit Code 0)")
