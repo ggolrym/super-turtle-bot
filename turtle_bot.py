@@ -1,6 +1,6 @@
 # ==========================================
 # 🚀 AI 하이브리드 터틀 봇 V36.6 Safe Defender Live
-# (4슬롯 분산 / 코스닥 통합 방어막 패치 🌟 / 스마트 익절 / 2026 세법 0.2% 단일화 / 연말 절세 탑재)
+# (4슬롯 분산 / 코스닥 통합 방어막 / 2026 세법 0.2% / 연말 절세 / KRX 풀스캔 우회 & 스텔스 🛡️)
 # ==========================================
 import os
 import yfinance as yf
@@ -10,6 +10,8 @@ import requests
 import time
 import math
 import json 
+import re
+import random
 from datetime import datetime, timedelta
 import pytz
 import warnings
@@ -134,12 +136,12 @@ MAX_HOLD_DAYS = 20
 
 # 💡 [2026년 기준] 정밀 수수료 및 거래세 (코스피/코스닥 0.20% 단일화)
 KR_FEE = 0.00015
-KR_KOSPI_TAX = 0.0020            # 코스피 증권거래세 0.20%
-KR_KOSDAQ_TAX = 0.0020           # 코스닥 증권거래세 0.20%
+KR_KOSPI_TAX = 0.0020            
+KR_KOSDAQ_TAX = 0.0020           
 US_FEE = 0.0025        
 US_SEC_FEE = 0.0000206 
-US_CGT_RATE = 0.22               # 미국주식 양도소득세율 22%
-US_CGT_DEDUCTION = 2500000       # 연간 기본공제 250만 원
+US_CGT_RATE = 0.22               
+US_CGT_DEDUCTION = 2500000       
 
 buy_signals, sell_signals = [], []
 dashboard_list = [] 
@@ -185,12 +187,11 @@ if SHEET_WEBHOOK_URL:
                         portfolio = data.get('portfolio', data) 
                         cooldown_tracker = data.get('cooldown_tracker', {})
                         
-                        # 연말 절세를 위한 데이터 복원 및 연도 초기화
                         saved_year = data.get('current_year', current_year)
                         if saved_year == current_year:
                             yearly_us_profit = float(data.get('yearly_us_profit', 0))
                         else:
-                            yearly_us_profit = 0 # 해가 바뀌면 한도 리셋
+                            yearly_us_profit = 0 
                             
                         if 'bot_cash' in data: 
                             bot_cash = float(data['bot_cash'])
@@ -298,7 +299,7 @@ current_kr_positions = sum(1 for p in portfolio.values() if isinstance(p, dict) 
 current_us_positions = sum(1 for p in portfolio.values() if isinstance(p, dict) and p.get('market') == 'US')
 
 # ==========================================
-# 🌟 4. 거래대금 필터링 & 유니버스 구축
+# 🌟 4. 거래대금 필터링 & 유니버스 구축 (💡 KRX 방화벽 우회 & 전 종목 스텔스 패치 적용)
 # ==========================================
 MIN_TURNOVER_KRW = 10000000000 
 MIN_PRICE_KRW = 1000           
@@ -306,27 +307,39 @@ all_stocks = {}
 
 print(f"⏳ 유니버스 사전 필터링 중... ({market_title})")
 
+def get_naver_full_universe(sosok, suffix, market_tag):
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+    
+    # 코스피(sosok=0): 최대 50페이지, 코스닥(sosok=1): 최대 40페이지 전수 조사
+    max_pages = 50 if sosok == 0 else 40
+    collected_count = 0
+    
+    for page in range(1, max_pages + 1):
+        try:
+            url = f"https://finance.naver.com/sise/sise_market_sum.naver?sosok={sosok}&page={page}"
+            res = requests.get(url, headers=headers, timeout=10)
+            
+            matches = re.findall(r'href="/item/main\.naver\?code=(\d{6})" class="tltle">(.*?)</a>', res.text)
+            if not matches:
+                break
+                
+            for code, name in matches:
+                full_code = f"{code}{suffix}"
+                all_stocks[full_code] = (market_tag, name, full_code)
+                collected_count += 1
+                
+            # 💡 [휴먼 패치] 페이지 전환 간격 (0.1 ~ 0.3초 무작위 스텔스 딜레이)
+            time.sleep(random.uniform(0.1, 0.3))
+        except Exception:
+            continue
+            
+    print(f"📦 [{market_tag}] 네이버 전체 페이지 스캔 완료: 총 {collected_count}개 종목 등록")
+
 if target_market in ['KR_KOSPI', 'ALL']:
-    try:
-        kr_df = fdr.StockListing('KOSPI')
-        for _, row in kr_df.iterrows(): 
-            try:
-                if float(row.get('Close', 0)) < MIN_PRICE_KRW or float(row.get('Amount', 0)) < MIN_TURNOVER_KRW: continue
-                code = str(row.get('Code', row.get('Symbol', ''))).zfill(6) + '.KS'
-                all_stocks[code] = ('KR_KOSPI', str(row.get('Name', '')), code)
-            except: continue
-    except: pass
+    get_naver_full_universe(0, '.KS', 'KR_KOSPI')
 
 if target_market in ['KR_KOSDAQ', 'ALL']:
-    try:
-        kq_df = fdr.StockListing('KOSDAQ')
-        for _, row in kq_df.iterrows():
-            try:
-                if float(row.get('Close', 0)) < MIN_PRICE_KRW or float(row.get('Amount', 0)) < MIN_TURNOVER_KRW: continue
-                code = str(row.get('Code', row.get('Symbol', ''))).zfill(6) + '.KQ'
-                all_stocks[code] = ('KR_KOSDAQ', str(row.get('Name', '')), code)
-            except: continue
-    except: pass
+    get_naver_full_universe(1, '.KQ', 'KR_KOSDAQ')
 
 special_tickers = {'BRKB': 'BRK-B', 'BFB': 'BF-B'}
 if target_market in ['US', 'ALL']:
@@ -338,10 +351,10 @@ if target_market in ['US', 'ALL']:
             raw_sym = str(row[col_sym])
             clean_sym = special_tickers.get(raw_sym, raw_sym.replace('.', '-').replace('/', '-'))
             all_stocks[clean_sym] = ('US', str(row[col_name]), clean_sym)
-        all_stocks['SPLG'] = ('US', 'SPDR S&P 500 ETF', 'SPLG')
-        all_stocks['QQQM'] = ('US', 'Invesco NASDAQ 100 ETF', 'QQQM')
-        all_stocks['SOXX'] = ('US', 'iShares Semiconductor ETF', 'SOXX')
     except: pass
+    all_stocks['SPLG'] = ('US', 'SPDR S&P 500 ETF', 'SPLG')
+    all_stocks['QQQM'] = ('US', 'Invesco NASDAQ 100 ETF', 'QQQM')
+    all_stocks['SOXX'] = ('US', 'iShares Semiconductor ETF', 'SOXX')
 
 for t in portfolio.keys():
     if t not in all_stocks:
@@ -349,15 +362,19 @@ for t in portfolio.keys():
         all_stocks[t] = (m, portfolio[t].get('name', t), t)
 
 # ==========================================
-# 🌟 5. 지표 계산 및 거래 판단
+# 🌟 5. 지표 계산 및 거래 판단 (💡 스텔스 랜덤 셔플 & 딜레이 적용)
 # ==========================================
 data_store, prices_cache = {}, {}
 fdr_start_date = (kr_time - timedelta(days=250)).strftime('%Y-%m-%d')
 error_count = 0
 
-print(f"⚡ 전체 시장 데이터({len(all_stocks)}개) 100% 안전 스캔 중...")
+print(f"⚡ 전체 시장 데이터({len(all_stocks)}개) 스텔스 스캔 중... (휴먼 모드 가동)")
 
-for ticker, (market, name, code) in all_stocks.items():
+# 💡 [휴먼 패치] 스캔할 종목 리스트의 순서를 무작위로 섞어서 봇의 기계적 패턴을 파괴합니다.
+shuffled_stocks = list(all_stocks.items())
+random.shuffle(shuffled_stocks)
+
+for ticker, (market, name, code) in shuffled_stocks:
     if ticker in cooldown_tracker and ticker not in portfolio: continue
     
     try:
@@ -370,7 +387,8 @@ for ticker, (market, name, code) in all_stocks.items():
                         stock_data = temp_data
                         break
                 except: pass
-                time.sleep(0.1) 
+                # 💡 [휴먼 패치] 한국장: 0.2초 ~ 0.6초 무작위 딜레이
+                time.sleep(random.uniform(0.2, 0.6)) 
         else:
             ticker_obj = yf.Ticker(ticker)
             for _ in range(3):
@@ -380,11 +398,18 @@ for ticker, (market, name, code) in all_stocks.items():
                         stock_data = temp_data
                         break
                 except: pass
-                time.sleep(0.3) 
+                # 💡 [휴먼 패치] 미국장: 0.4초 ~ 0.9초 무작위 딜레이
+                time.sleep(random.uniform(0.4, 0.9)) 
 
         if stock_data.empty or len(stock_data) < 120: 
             error_count += 1
             continue 
+
+        # 💡 [신규 패치] 네이버 크롤링으로 누락된 거래대금(100억) 및 동전주(1000원) 하위 필터링 보완
+        current_price = float(stock_data['Close'].iloc[-1])
+        avg_volume = float(stock_data['Volume'].iloc[-20:].mean())
+        if market.startswith('KR') and (current_price < MIN_PRICE_KRW or (current_price * avg_volume) < MIN_TURNOVER_KRW):
+            continue
 
         stock_data['MA10'] = stock_data['Close'].rolling(10).mean()
         stock_data['MA20'] = stock_data['Close'].rolling(20).mean()
@@ -404,7 +429,7 @@ for ticker, (market, name, code) in all_stocks.items():
         error_count += 1
         continue
 
-print(f"✅ 안전 스캔 완료! (성공: {len(data_store)}개 / 실패: {error_count}개)")
+print(f"✅ 스텔스 스캔 완료! (성공: {len(data_store)}개 / 실패: {error_count}개)")
 
 kr_candidates, us_candidates = [], []
 def fmt_price(p, is_kr): return f"{p:,.0f}" if is_kr else f"{p:,.2f}"
@@ -535,7 +560,6 @@ if kis_token:
         is_kr = market.startswith('KR')
         krw_price = curr_price if is_kr else curr_price * EXCHANGE_RATE
         
-        # 💡 매수 상한선 필터링
         if krw_price > MAX_PRICE_LIMIT: continue 
         
         if krw_price > target_pos_size_krw: continue
@@ -672,4 +696,4 @@ if SHEET_WEBHOOK_URL:
         else: print(f"⚠️ 구글 시트 전송 실패 (HTTP {req.status_code})")
     except Exception as e: print(f"🚨 구글 시트 통신 에러: {e}")
 
-print("🏁 봇 실행 완료 (Exit Code 0)")
+print("🏁 봇 실행 완료 (Exit Code 0)") 여기에 한국장 유니버스 스캔시 코스피 200위 코스닥 200위까지 짤라서 설정하는 기능이 있는지 확인한다.
