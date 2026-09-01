@@ -125,7 +125,7 @@ def execute_order(ticker, qty, side="BUY", price=0.0):
 # ==========================================
 INITIAL_CAPITAL = 500000         
 POSITION_SIZE_RATIO = 0.25       # 4슬롯 분산
-MAX_PRICE_LIMIT = 130000         # 💡 매수 상한선: 1주당 13만 원 이하 종목만 매수
+MAX_PRICE_LIMIT = 150000         # 💡 매수 상한선: 1주당 13만 원 이하 종목만 매수
 MAX_POSITIONS = 4                
 MAX_KR_POSITIONS = 2             
 MAX_US_POSITIONS = 2             
