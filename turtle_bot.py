@@ -1,6 +1,6 @@
 # ==========================================
 # 🚀 AI 하이브리드 터틀 봇 V36.6 Safe Defender Live
-# (4슬롯 분산 / 코스닥 방어막 / 우량주 400선 / 구글시트 제거 & 디스코드 전용 📱)
+# (4슬롯 분산 / 코스닥 통합 방어막 / 2026 세법 0.2% / 연말 절세 / 우량주 400선 최적화 & 생존 신고 🛡️)
 # ==========================================
 import os
 import yfinance as yf
@@ -20,15 +20,16 @@ import logging
 warnings.filterwarnings('ignore')
 logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 
-# 🌟 1. 환경 변수 로드 (시트 관련 변수 제거)
+# 🌟 1. 환경 변수 로드
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip() 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
 KIS_APP_KEY = os.environ.get("KIS_APP_KEY", "").strip()
 KIS_APP_SECRET = os.environ.get("KIS_APP_SECRET", "").strip()
 KIS_ACCOUNT = os.environ.get("KIS_ACCOUNT", "").strip()
+SHEET_WEBHOOK_URL = os.environ.get("SHEET_WEBHOOK_URL", "").strip() 
 RUN_MARKET = os.environ.get("RUN_MARKET", "AUTO").strip()
 
-if not all([DISCORD_WEBHOOK_URL, KIS_APP_KEY, KIS_APP_SECRET, KIS_ACCOUNT]):
+if not all([DISCORD_WEBHOOK_URL, KIS_APP_KEY, KIS_APP_SECRET, KIS_ACCOUNT, SHEET_WEBHOOK_URL]):
     print("🚨 필수 API 키 또는 깃허브 시크릿 누락!")
     exit(1)
 
@@ -49,7 +50,7 @@ elif RUN_MARKET == 'US': target_market, market_title = 'US', "🇺🇸 미국장
 else: target_market, market_title = 'ALL', "🌐 통합장"
 
 print(f"⏰ 현재 한국시간: {kr_time.strftime('%Y-%m-%d %H:%M:%S')} (적용 환율: {EXCHANGE_RATE:,.1f}원)")
-print(f"🎯 V36.6 Safe Defender 가동 (4슬롯 분산 / 디스코드 알림 전용 / {market_title})\n")
+print(f"🎯 V36.6 Safe Defender 가동 (4슬롯 분산 / 극강의 안전 수집 / {market_title})\n")
 
 # 🌟 2. KIS API 통신 모듈
 def get_kis_token():
@@ -124,7 +125,7 @@ def execute_order(ticker, qty, side="BUY", price=0.0):
 # ==========================================
 INITIAL_CAPITAL = 500000         
 POSITION_SIZE_RATIO = 0.25       # 4슬롯 분산
-MAX_PRICE_LIMIT = 150000         # 매수 상한선: 1주당 15만 원 이하 종목만 매수
+MAX_PRICE_LIMIT = 150000         # 💡 매수 상한선: 1주당 13만 원 이하 종목만 매수
 MAX_POSITIONS = 4                
 MAX_KR_POSITIONS = 2             
 MAX_US_POSITIONS = 2             
@@ -133,6 +134,7 @@ FIXED_STOP_LOSS_KR = 0.08
 FIXED_STOP_LOSS_US = 0.08   
 MAX_HOLD_DAYS = 20         
 
+# 💡 [2026년 기준] 정밀 수수료 및 거래세 (코스피/코스닥 0.20% 단일화)
 KR_FEE = 0.00015
 KR_KOSPI_TAX = 0.0020            
 KR_KOSDAQ_TAX = 0.0020           
@@ -142,10 +144,12 @@ US_CGT_RATE = 0.22
 US_CGT_DEDUCTION = 2500000       
 
 buy_signals, sell_signals = [], []
+dashboard_list = [] 
 portfolio = {}
 bot_cash = INITIAL_CAPITAL 
 cooldown_tracker = {} 
 
+# 연말 절세를 위한 실현 수익 트래커
 yearly_us_profit = 0
 current_year = kr_time.year
 
@@ -170,7 +174,43 @@ print(f"🛡️ 단기 방어막(MA20 & MA50) 상태:")
 print(f" - KR(한국장 전체): {'🟢 안전' if macro_bull['KR'] else '🔴 하락장 방어 중'}")
 print(f" - US(미국장 전체): {'🟢 안전' if macro_bull['US'] else '🔴 하락장 방어 중'}\n")
 
-# 잔고 이중 검증 및 실시간 포트폴리오 동기화 (구글 시트 대신 증권사 API 직접 조회)
+# DB 불러오기
+if SHEET_WEBHOOK_URL:
+    for attempt in range(3):
+        try:
+            res = requests.get(SHEET_WEBHOOK_URL, timeout=30, allow_redirects=True)
+            if res.status_code == 200:
+                raw_text = res.text.strip()
+                if raw_text.startswith('{') and raw_text.endswith('}'):
+                    data = json.loads(raw_text)
+                    if isinstance(data, dict): 
+                        portfolio = data.get('portfolio', data) 
+                        cooldown_tracker = data.get('cooldown_tracker', {})
+                        
+                        saved_year = data.get('current_year', current_year)
+                        if saved_year == current_year:
+                            yearly_us_profit = float(data.get('yearly_us_profit', 0))
+                        else:
+                            yearly_us_profit = 0 
+                            
+                        if 'bot_cash' in data: 
+                            bot_cash = float(data['bot_cash'])
+                        else:
+                            invested = sum(p.get('buy_price', 0) * p.get('units', 0) * (1 if str(p.get('market', '')).startswith('KR') else EXCHANGE_RATE) for p in portfolio.values() if isinstance(p, dict))
+                            bot_cash = INITIAL_CAPITAL - invested
+                break
+            time.sleep(5)
+        except: time.sleep(5)
+
+active_cooldowns = {}
+for t, expire_date in cooldown_tracker.items():
+    try:
+        if datetime.strptime(expire_date, '%Y-%m-%d').date() > kr_time.date():
+            active_cooldowns[t] = expire_date
+    except: pass
+cooldown_tracker = active_cooldowns
+
+# 잔고 이중 검증 및 서버 장중 손절 감지
 def sync_portfolio_with_kis_balance(current_portfolio):
     if not kis_token: return current_portfolio
     clean_account = KIS_ACCOUNT.replace("-", "")
@@ -201,14 +241,53 @@ def sync_portfolio_with_kis_balance(current_portfolio):
         if res.status_code == 200 and data.get('rt_cd') == '0':
             us_api_success = True
             for item in data.get('output1', []):
-                # 💡 [핵심 패치] KIS 해외 잔고 수량 필드명을 'ovrs_cblc_qty'로 정확히 수정
-                qty = int(float(item.get('ovrs_cblc_qty', 0))) 
+                qty = int(max(float(item.get('ccld_qty_smtl1', 0)), float(item.get('cblc_qty13', 0)))) 
                 if qty > 0:
                     sym = item.get('ovrs_pdno', '').replace('.', '-').replace('/', '-')
                     if sym: us_tickers[sym] = {'qty': qty, 'avg_price': float(item.get('pchs_avg_pric', 0))}
     except: pass
 
+    global bot_cash
     synced = {}
+    for t, p in current_portfolio.items():
+        if not isinstance(p, dict): continue 
+        clean_t = t.split('.')[0]
+        is_kr = t.endswith('.KS') or t.endswith('.KQ')
+        
+        if is_kr and kr_api_success and (clean_t not in kr_tickers and t not in kr_tickers):
+            print(f"⚠️ {t} 잔고 없음 (장중 서버 자동손절 감지) ➔ 쿨다운 5일 적용")
+            sell_signals.append(f"🔪 서버 장중 손절 감지: {p.get('name')} (현금 회수 완료)")
+            applied_kr_tax = KR_KOSPI_TAX if t.endswith('.KS') else KR_KOSDAQ_TAX
+            bot_cash += (p['units'] * p['buy_price'] * (1 - FIXED_STOP_LOSS_KR) * (1 - KR_FEE - applied_kr_tax))
+            cooldown_tracker[t] = (kr_time + timedelta(days=5)).strftime('%Y-%m-%d')
+            continue
+            
+        if not is_kr and us_api_success and (clean_t not in us_tickers and t not in us_tickers):
+            print(f"⚠️ {t} 잔고 없음 (장중 서버 자동손절 감지) ➔ 쿨다운 5일 적용")
+            sell_signals.append(f"🔪 서버 장중 손절 감지: {p.get('name')} (현금 회수 완료)")
+            bot_cash += (p['units'] * p['buy_price'] * (1 - FIXED_STOP_LOSS_US) * (1 - US_FEE - US_SEC_FEE) * EXCHANGE_RATE)
+            cooldown_tracker[t] = (kr_time + timedelta(days=5)).strftime('%Y-%m-%d')
+            continue
+            
+        if is_kr:
+            if not kr_api_success: 
+                synced[t] = p
+                continue
+            match_k = clean_t if clean_t in kr_tickers else t
+            p['units'] = kr_tickers[match_k]['qty']
+            if p.get('buy_price', 0) == 0: p['buy_price'] = kr_tickers[match_k]['avg_price']
+            synced[t] = p
+            del kr_tickers[match_k] 
+        else:
+            if not us_api_success: 
+                synced[t] = p
+                continue
+            match_k = clean_t if clean_t in us_tickers else t
+            p['units'] = us_tickers[match_k]['qty']
+            if p.get('buy_price', 0) == 0: p['buy_price'] = us_tickers[match_k]['avg_price']
+            synced[t] = p
+            del us_tickers[match_k] 
+
     if us_api_success:
         for sym, data in us_tickers.items(): synced[sym] = {'name': sym, 'units': data['qty'], 'buy_price': data['avg_price'], 'market': 'US', 'buy_date': today_str, 'hold_days': 0}
     if kr_api_success:
@@ -216,16 +295,11 @@ def sync_portfolio_with_kis_balance(current_portfolio):
     return synced
 
 portfolio = sync_portfolio_with_kis_balance(portfolio)
-
-# 남은 현금 동적 역산
-invested_amount = sum(p.get('buy_price', 0) * p.get('units', 0) * (1 if str(p.get('market', '')).startswith('KR') else EXCHANGE_RATE) for p in portfolio.values())
-bot_cash = INITIAL_CAPITAL - invested_amount
-
 current_kr_positions = sum(1 for p in portfolio.values() if isinstance(p, dict) and p.get('market', '').startswith('KR'))
 current_us_positions = sum(1 for p in portfolio.values() if isinstance(p, dict) and p.get('market') == 'US')
 
 # ==========================================
-# 🌟 4. 거래대금 필터링 & 유니버스 구축
+# 🌟 4. 거래대금 필터링 & 유니버스 구축 (💡 안전 최적화: 시총 상위 400개 우량주 컷)
 # ==========================================
 MIN_TURNOVER_KRW = 10000000000 
 MIN_PRICE_KRW = 1000           
@@ -233,9 +307,10 @@ all_stocks = {}
 
 print(f"⏳ 유니버스 사전 필터링 중... ({market_title})")
 
+# 💡 네이버 금융 시가총액 상위 400개 기업 크롤링 (시총 상위 1~4페이지)
 def get_naver_universe(sosok, suffix, market_tag):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-    for page in range(1, 5): 
+    for page in range(1, 5): # 👈 1~4페이지 (상위 200개)로 안전하게 최적화
         try:
             url = f"https://finance.naver.com/sise/sise_market_sum.naver?sosok={sosok}&page={page}"
             res = requests.get(url, headers=headers, timeout=10)
@@ -245,7 +320,7 @@ def get_naver_universe(sosok, suffix, market_tag):
                 full_code = f"{code}{suffix}"
                 all_stocks[full_code] = (market_tag, name, full_code)
             
-            time.sleep(random.uniform(0.5, 1.5))
+            time.sleep(random.uniform(0.5, 1.5)) # 페이지 간격 딜레이
         except Exception:
             pass
 
@@ -276,7 +351,7 @@ for t in portfolio.keys():
         all_stocks[t] = (m, portfolio[t].get('name', t), t)
 
 # ==========================================
-# 🌟 5. 지표 계산 및 거래 판단
+# 🌟 5. 지표 계산 및 거래 판단 (💡 스텔스 랜덤 셔플 & 생존 신고 패치 적용)
 # ==========================================
 data_store, prices_cache = {}, {}
 fdr_start_date = (kr_time - timedelta(days=250)).strftime('%Y-%m-%d')
@@ -287,10 +362,15 @@ print(f"⚡ 전체 시장 데이터({len(all_stocks)}개) 스텔스 스캔 중..
 shuffled_stocks = list(all_stocks.items())
 random.shuffle(shuffled_stocks)
 
+# 💡 [생존 신고 패치] 깃허브 액션 10분 타임아웃 방지를 위해 i 카운터 도입
 for i, (ticker, (market, name, code)) in enumerate(shuffled_stocks):
+    
+    # 100개 스캔할 때마다 생존 로그 출력 (깃허브 타임아웃 방어)
     if (i + 1) % 100 == 0:
         print(f"🔄 스캐닝 진행 중... ({i + 1}/{len(shuffled_stocks)}) 종목 완료")
 
+    if ticker in cooldown_tracker and ticker not in portfolio: continue
+    
     try:
         stock_data = pd.DataFrame()
         if market.startswith('KR'):
@@ -353,7 +433,54 @@ total_bot_equity = bot_cash + current_portfolio_value
 
 if kis_token:
     
-    # [A] 매도 심사 (스마트 익절 및 하드스탑)
+    # -----------------------------------
+    # 💡 [특별 심사] 실전 연말 미국 주식 절세 (Tax Harvesting) 로직
+    # -----------------------------------
+    if kr_time.month == 12 and kr_time.day >= 24:
+        rem_deduct = US_CGT_DEDUCTION - yearly_us_profit
+        if rem_deduct > 0:
+            for ticker in list(portfolio.keys()):
+                if portfolio[ticker].get('market') != 'US': continue
+                if ticker not in data_store: continue
+                
+                df = data_store[ticker]
+                curr_price = float(df['Close'].iloc[-1])
+                pos = portfolio[ticker]
+                
+                buy_price = float(pos.get('buy_price', 0))
+                if buy_price <= 0: continue
+                
+                net_sell_price_per_share = curr_price * (1 - US_FEE - US_SEC_FEE) * EXCHANGE_RATE
+                cost_per_share = buy_price * (1 + US_FEE) * EXCHANGE_RATE 
+                profit_per_share = net_sell_price_per_share - cost_per_share
+                
+                if profit_per_share > 0:
+                    shares_to_sell = min(pos['units'], math.floor(rem_deduct / profit_per_share))
+                    
+                    if shares_to_sell > 0:
+                        res = execute_order(ticker, shares_to_sell, side="SELL", price=curr_price)
+                        if res['success']:
+                            sell_amt = shares_to_sell * curr_price * EXCHANGE_RATE
+                            net_sell_amt = sell_amt * (1 - US_FEE - US_SEC_FEE)
+                            realized_profit = shares_to_sell * profit_per_share
+                            
+                            bot_cash += net_sell_amt
+                            yearly_us_profit += realized_profit
+                            rem_deduct -= realized_profit
+                            
+                            sell_signals.append(f"🌟 연말 절세 실현: {pos['name']} | {shares_to_sell}주 익절매도 (공제활용: +{realized_profit:,.0f}원)")
+                            
+                            if shares_to_sell == pos['units']:
+                                current_us_positions -= 1
+                                del portfolio[ticker]
+                            else:
+                                portfolio[ticker]['units'] -= shares_to_sell
+                                
+                            if rem_deduct <= 0: break
+
+    # -----------------------------------
+    # [A] 매도 심사 (스마트 트레일링 익절 탑재)
+    # -----------------------------------
     for ticker in list(portfolio.keys()):
         if ticker not in data_store: continue
         df = data_store[ticker]
@@ -365,6 +492,9 @@ if kis_token:
         
         buy_price = float(pos.get('buy_price', 0))
         if buy_price <= 0: buy_price = curr_price
+        
+        hold_days = pos.get('hold_days', 0) + 1
+        portfolio[ticker]['hold_days'] = hold_days
         
         profit_pct = ((curr_price / buy_price) - 1.0)
         sell_reason = None
@@ -379,8 +509,11 @@ if kis_token:
         
         if curr_price <= sl_price: 
             sell_reason = f"하드스탑(-{sl_pct*100}%)"
+            cooldown_tracker[ticker] = (kr_time + timedelta(days=5)).strftime('%Y-%m-%d')
         elif curr_price > buy_price and curr_price < tp_ma: 
             sell_reason = "스마트 이평선 익절" 
+        elif hold_days >= MAX_HOLD_DAYS and curr_price <= buy_price: 
+            sell_reason = "타임스탑 탈출"
                 
         if sell_reason:
             res = execute_order(ticker, pos['units'], side="SELL", price=curr_price)
@@ -391,12 +524,20 @@ if kis_token:
                 applied_kr_tax = KR_KOSPI_TAX if market == 'KR_KOSPI' else KR_KOSDAQ_TAX
                 fee_deduct = (KR_FEE + applied_kr_tax) if is_kr else (US_FEE + US_SEC_FEE)
                 bot_cash += sell_amt * (1 - fee_deduct) 
+                
+                if not is_kr:
+                    net_sell_price_per_share = curr_price * (1 - US_FEE - US_SEC_FEE) * EXCHANGE_RATE
+                    cost_per_share = buy_price * (1 + US_FEE) * EXCHANGE_RATE
+                    realized_trade_profit = pos['units'] * (net_sell_price_per_share - cost_per_share)
+                    yearly_us_profit += realized_trade_profit
 
                 if is_kr: current_kr_positions -= 1
                 else: current_us_positions -= 1
                 del portfolio[ticker] 
 
+    # -----------------------------------
     # [B] 매수 심사
+    # -----------------------------------
     target_pos_size_krw = total_bot_equity * POSITION_SIZE_RATIO 
     
     for ticker, df in data_store.items():
@@ -452,17 +593,42 @@ if kis_token:
             else: current_us_positions += 1
 
 # ==========================================
-# 🌟 6. 디스코드 알림 메시지 생성 및 발송
+# 🌟 6. 시트 데이터 생성 및 디스코드 발송
 # ==========================================
-msg_lines = [f"🤖 **V36.6 Safe Defender Live (디스코드 전용 봇)** 🤖\n"]
-msg_lines.append(f"💰 **추정 총자산:** 약 {int(total_bot_equity):,}원 (가용현금: {int(bot_cash):,}원)\n")
+for ticker, pos in portfolio.items():
+    cp = prices_cache.get(ticker, pos.get('buy_price', 0))
+    bp = pos.get('buy_price', 0)
+    units = pos.get('units', 0)
+    ret_pct = ((cp / bp) - 1) * 100 if bp > 0 else 0
+    is_kr = pos.get('market', '').startswith('KR')
+    sl_pct = FIXED_STOP_LOSS_KR if is_kr else FIXED_STOP_LOSS_US
+    sl_price = bp * (1 - sl_pct)
+    
+    trend_exit_price = 0
+    if ticker in data_store:
+        df_ticker = data_store[ticker]
+        if is_kr:
+            trend_exit_price = float(df_ticker['MA10'].iloc[-1])
+        else:
+            trend_exit_price = float(df_ticker['MA10'].iloc[-1]) if ret_pct >= 10.0 else float(df_ticker['MA20'].iloc[-1])
+    
+    dashboard_list.append({
+        "name": pos.get('name', ticker), "units": units, 
+        "buy_price": round(bp, 2), "current_price": round(cp, 2), 
+        "invested": round(bp * units, 2), "return_pct": round(ret_pct, 2), "stop_loss": round(sl_price, 2),
+        "trend_exit": round(trend_exit_price, 2)
+    })
+
+msg_lines = [f"🤖 **V36.6 Safe Defender Live (코스닥 통합방어막 & 절세 봇)** 🤖\n"]
+msg_lines.append(f"💰 **추정 총자산:** 약 {int(total_bot_equity):,}원 (가용현금: {int(bot_cash):,}원)")
+msg_lines.append(f"🇺🇸 금년도 미국주식 실현수익: {int(yearly_us_profit):,}원 (비과세 한도 250만 원)\n")
 
 if not kis_token:
     msg_lines.append(f"🚨 **시스템 경보:** API 토큰 발급 실패")
 else:
     if buy_signals or sell_signals:
         if buy_signals:
-            msg_lines.append("**[🚀 오늘의 신규 매수 (서버 자동주문 완료!)]**")
+            msg_lines.append("**[🚀 오늘의 신규 매수 (서버 자동주문 필수!)]**")
             msg_lines.extend(buy_signals)
             msg_lines.append("")
         if sell_signals:
@@ -472,9 +638,9 @@ else:
     else:
         msg_lines.append("💤 오늘 발생한 신규 매수/청산 신호가 없습니다.\n")
 
-msg_lines.append(f"**[📊 상태 보고]** 정예 종목 {len(data_store)}개 스캔 완료\n")
+msg_lines.append(f"**[📊 상태 보고]** 정예 종목 {len(data_store)}개 스캔 완료 | 활성 쿨다운: {len(cooldown_tracker)}종목\n")
 
-msg_lines.append("**[💼 현재 보유 포트폴리오 (증권사 실시간 잔고)]**")
+msg_lines.append("**[💼 현재 보유 포트폴리오]**")
 if not portfolio:
     msg_lines.append("보유 중인 종목이 없습니다. (현금 대기 중)")
 else:
@@ -502,5 +668,23 @@ try:
     if req.status_code in [200, 204]: print("✅ 디스코드 알림 발송 성공!")
     else: print(f"⚠️ 디스코드 발송 실패 (HTTP {req.status_code})")
 except Exception as e: print(f"🚨 디스코드 통신 에러: {e}")
+
+print("📡 구글 시트 데이터 전송 시도 중...")
+if SHEET_WEBHOOK_URL:
+    sheet_data = {
+        "date": kr_time.strftime('%Y-%m-%d %H:%M:%S'), 
+        "message": f"자산 {int(total_bot_equity):,}원 / 진입 {len(buy_signals)}건", 
+        "dashboard": dashboard_list, 
+        "portfolio": portfolio,
+        "bot_cash": bot_cash,
+        "cooldown_tracker": cooldown_tracker,
+        "yearly_us_profit": yearly_us_profit,
+        "current_year": current_year
+    }
+    try: 
+        req = requests.post(SHEET_WEBHOOK_URL, json=sheet_data, timeout=30)
+        if req.status_code == 200: print("✅ 구글 시트 데이터 전송 성공!")
+        else: print(f"⚠️ 구글 시트 전송 실패 (HTTP {req.status_code})")
+    except Exception as e: print(f"🚨 구글 시트 통신 에러: {e}")
 
 print("🏁 봇 실행 완료 (Exit Code 0)")
