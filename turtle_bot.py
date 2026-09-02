@@ -201,7 +201,8 @@ def sync_portfolio_with_kis_balance(current_portfolio):
         if res.status_code == 200 and data.get('rt_cd') == '0':
             us_api_success = True
             for item in data.get('output1', []):
-                qty = int(max(float(item.get('ccld_qty_smtl1', 0)), float(item.get('cblc_qty13', 0)))) 
+                # 💡 [핵심 패치] KIS 해외 잔고 수량 필드명을 'ovrs_cblc_qty'로 정확히 수정
+                qty = int(float(item.get('ovrs_cblc_qty', 0))) 
                 if qty > 0:
                     sym = item.get('ovrs_pdno', '').replace('.', '-').replace('/', '-')
                     if sym: us_tickers[sym] = {'qty': qty, 'avg_price': float(item.get('pchs_avg_pric', 0))}
