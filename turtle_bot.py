@@ -1,6 +1,6 @@
 # ==========================================
 # 🚀 AI 하이브리드 터틀 봇 V36.6 Safe Defender Live
-# (미장 모의투자 X-Ray 진단 패치 / 시트 강제초기화 🛡️)
+# (미장 모의투자 X-Ray 진단 패치 / 누락 변수 완벽 복원 🛡️)
 # ==========================================
 import os
 import yfinance as yf
@@ -20,8 +20,10 @@ import logging
 warnings.filterwarnings('ignore')
 logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 
+# 🌟 0. 핵심 스위치: 구글 시트 강제 초기화
 FORCE_RESET_SHEET = True  
 
+# 🌟 1. 환경 변수 로드
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip() 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
 KIS_APP_KEY = os.environ.get("KIS_APP_KEY", "").strip()
@@ -44,7 +46,14 @@ try:
     if not ex_df.empty: EXCHANGE_RATE = float(ex_df['Close'].iloc[-1])
 except: pass
 
+# 💡 [버그 픽스] 실수로 누락되었던 시장 구분 설정 4줄 복원 완료!
+if RUN_MARKET == 'KOSPI': target_market, market_title = 'KR_KOSPI', "🇰🇷 코스피 전용"
+elif RUN_MARKET == 'KOSDAQ': target_market, market_title = 'KR_KOSDAQ', "🚀 코스닥 전용"
+elif RUN_MARKET == 'US': target_market, market_title = 'US', "🇺🇸 미국장 전용"
+else: target_market, market_title = 'ALL', "🌐 통합장"
+
 print(f"⏰ 현재 한국시간: {kr_time.strftime('%Y-%m-%d %H:%M:%S')} (적용 환율: {EXCHANGE_RATE:,.1f}원)")
+print(f"🎯 V36.6 Safe Defender 가동 (4슬롯 분산 / 시트 강제초기화 모드: {FORCE_RESET_SHEET})\n")
 
 def get_kis_token():
     url = f"{KIS_URL}/oauth2/tokenP"
@@ -112,7 +121,7 @@ cooldown_tracker = {}
 yearly_us_profit = 0
 current_year = kr_time.year
 us_balance_error_log = "" 
-us_xray_logs = [] # 💡 API 엑스레이 로거
+us_xray_logs = []
 
 def check_macro_regime(index_ticker):
     try:
@@ -157,7 +166,6 @@ def sync_portfolio_with_kis_balance(current_portfolio):
     kr_api_success, us_api_success = False, False 
     headers = {"Content-Type": "application/json; charset=utf-8", "authorization": f"Bearer {kis_token}", "appkey": KIS_APP_KEY, "appsecret": KIS_APP_SECRET}
     
-    # 1. 한국장 조회
     try: 
         headers["tr_id"] = f"{tr_prefix}TTC8434R"
         params = {"CANO": cano, "ACNT_PRDT_CD": prdt_cd, "AFHR_FLPR_YN": "N", "OFL_YN": "", "INQR_DVSN": "01", "UNPR_DVSN": "01", "FUND_STTL_ICLD_YN": "N", "FNCG_AMT_AUTO_RDPT_YN": "N", "PRCS_DVSN": "00", "CTX_AREA_FK100": "", "CTX_AREA_NK100": ""}
@@ -170,7 +178,6 @@ def sync_portfolio_with_kis_balance(current_portfolio):
                 if qty > 0: kr_tickers[item.get('pdno')] = {'name': item.get('prdt_name', item.get('pdno')), 'qty': qty, 'avg_price': float(item.get('pchs_avg_pric', 0))}
     except: pass
 
-    # 2. 💡 미국장 조회 (X-Ray 모드 작동)
     for excg in ["NAS", "NYS", "AMS"]:
         try: 
             headers["tr_id"] = f"{tr_prefix}TTS3012R"
@@ -180,18 +187,17 @@ def sync_portfolio_with_kis_balance(current_portfolio):
             if data.get('rt_cd') == '0':
                 us_api_success = True
                 items = data.get('output1', [])
-                us_xray_logs.append(f"{excg}: {len(items)}개") # 💡 엑스레이 기록
+                us_xray_logs.append(f"{excg}: {len(items)}개")
                 
                 for item in items:
                     qty = 0
-                    # 필드명 오작동 대비 수량 강제 스캔
                     for k, v in item.items():
                         if ('qty' in k or 'cblc' in k) and str(v).replace('.','',1).isdigit():
                             if float(v) > qty: qty = float(v)
                     
                     if qty > 0:
                         sym = item.get('ovrs_pdno', '').replace('.', '-').replace('/', '-')
-                        if sym == 'BAX': continue # 블랙리스트 종목 원천 차단
+                        if sym == 'BAX': continue # BAX 박스터 인터내셔널 포트폴리오 제외
                         name = item.get('ovrs_item_name', item.get('prdt_name', sym))
                         if sym: us_tickers[sym] = {'name': name, 'qty': int(qty), 'avg_price': float(item.get('pchs_avg_pric', 0))}
             else:
@@ -249,9 +255,6 @@ portfolio = sync_portfolio_with_kis_balance(portfolio)
 current_kr_positions = sum(1 for p in portfolio.values() if isinstance(p, dict) and p.get('market', '').startswith('KR'))
 current_us_positions = sum(1 for p in portfolio.values() if isinstance(p, dict) and p.get('market') == 'US')
 
-# ==========================================
-# 🌟 4. 거래대금 필터링 & 유니버스 구축
-# ==========================================
 MIN_TURNOVER_KRW, MIN_PRICE_KRW = 10000000000, 1000           
 all_stocks = {}
 
@@ -288,9 +291,6 @@ for t in portfolio.keys():
         m = 'KR_KOSPI' if t.endswith('.KS') else 'KR_KOSDAQ' if t.endswith('.KQ') else 'US'
         all_stocks[t] = (m, portfolio[t].get('name', t), t)
 
-# ==========================================
-# 🌟 5. 지표 계산 및 거래 판단
-# ==========================================
 data_store, prices_cache = {}, {}
 fdr_start_date = (kr_time - timedelta(days=250)).strftime('%Y-%m-%d')
 error_count = 0
@@ -422,9 +422,6 @@ if kis_token:
             if is_kr: current_kr_positions += 1
             else: current_us_positions += 1
 
-# ==========================================
-# 🌟 6. 시트 데이터 생성 및 디스코드 발송
-# ==========================================
 for ticker, pos in portfolio.items():
     cp = prices_cache.get(ticker, pos.get('buy_price', 0))
     bp = pos.get('buy_price', 0)
@@ -443,7 +440,6 @@ msg_lines = [f"🤖 **V36.6 Safe Defender Live** 🤖\n"]
 if FORCE_RESET_SHEET: msg_lines.append("⚠️ **주의:** 현재 시트 강제 초기화 모드가 켜져있습니다. 이 알림을 확인 후 반드시 `FORCE_RESET_SHEET = False`로 변경하세요!\n")
 msg_lines.append(f"💰 **추정 총자산:** 약 {int(total_bot_equity):,}원 (가용현금: {int(bot_cash):,}원)")
 
-# 💡 미장 엑스레이 결과 출력
 if us_xray_logs: msg_lines.append(f"🔍 **[미장 API 엑스레이]** {' / '.join(us_xray_logs)}")
 if us_balance_error_log: msg_lines.append(f"⚠️ **미장 잔고 API 통신 경고:** {us_balance_error_log}\n")
 
