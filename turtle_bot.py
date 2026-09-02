@@ -178,10 +178,20 @@ def sync_portfolio_with_kis_balance(current_portfolio):
                 if qty > 0: kr_tickers[item.get('pdno')] = {'name': item.get('prdt_name', item.get('pdno')), 'qty': qty, 'avg_price': float(item.get('pchs_avg_pric', 0))}
     except: pass
 
+    # 2. 💡 미국장 잔고 조회 (초당 요청 초과 방지 1초 딜레이 및 시장 코드 보강)
     for excg in ["NAS", "NYS", "AMS"]:
+        time.sleep(1.0)  # 👈 초당 거래건수 초과 방지 필수 딜레이 (1초 휴식)
         try: 
             headers["tr_id"] = f"{tr_prefix}TTS3012R"
-            params = {"CANO": cano, "ACNT_PRDT_CD": prdt_cd, "OVRS_EXCG_CD": excg, "TR_CRCY_CD": "USD", "CTX_AREA_FK200": "", "CTX_AREA_NK200": ""}
+            params = {
+                "CANO": cano, 
+                "ACNT_PRDT_CD": prdt_cd, 
+                "OVRS_EXCG_CD": excg,
+                "TR_CRCY_CD": "USD",
+                "TR_MKET_CD": "00",  # 👈 전체 시장 대상
+                "CTX_AREA_FK200": "", 
+                "CTX_AREA_NK200": ""
+            }
             res = requests.get(f"{KIS_URL}/uapi/overseas-stock/v1/trading/inquire-present-balance", headers=headers, params=params, timeout=10)
             data = res.json()
             if data.get('rt_cd') == '0':
@@ -192,18 +202,23 @@ def sync_portfolio_with_kis_balance(current_portfolio):
                 for item in items:
                     qty = 0
                     for k, v in item.items():
-                        if ('qty' in k or 'cblc' in k) and str(v).replace('.','',1).isdigit():
+                        if ('qty' in k or 'cblc' in k) and str(v).replace('.', '', 1).isdigit():
                             if float(v) > qty: qty = float(v)
                     
                     if qty > 0:
                         sym = item.get('ovrs_pdno', '').replace('.', '-').replace('/', '-')
-                        if sym == 'BAX': continue # BAX 박스터 인터내셔널 포트폴리오 제외
                         name = item.get('ovrs_item_name', item.get('prdt_name', sym))
-                        if sym: us_tickers[sym] = {'name': name, 'qty': int(qty), 'avg_price': float(item.get('pchs_avg_pric', 0))}
+                        if sym: 
+                            us_tickers[sym] = {'name': name, 'qty': int(qty), 'avg_price': float(item.get('pchs_avg_pric', 0))}
             else:
-                if not us_api_success: us_balance_error_log = data.get('msg1', '에러 불명')
+                err_msg = data.get('msg1', '에러 불명')
+                us_xray_logs.append(f"{excg}: 실패({err_msg})")
+                if not us_api_success: 
+                    us_balance_error_log = err_msg
         except Exception as e: 
-            if not us_api_success: us_balance_error_log = str(e)
+            us_xray_logs.append(f"{excg}: 통신에러")
+            if not us_api_success: 
+                us_balance_error_log = str(e)
 
     synced = {}
     for t, p in current_portfolio.items():
