@@ -1,6 +1,6 @@
 # ==========================================
 # 🚀 AI 하이브리드 터틀 봇 V36.6 Safe Defender Live
-# (모의투자 미국장 인식 버그 수정 / 구글 시트 원클릭 초기화 패치 🛡️)
+# (미장 잔고 API 규격 패치 / 시트 강제초기화 🛡️)
 # ==========================================
 import os
 import yfinance as yf
@@ -21,7 +21,7 @@ warnings.filterwarnings('ignore')
 logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 
 # 🌟 0. 핵심 스위치: 구글 시트 강제 초기화
-# 💡 현재 증권사 잔고로 시트를 덮어씌우려면 True로 둡니다. (정상적으로 미국주식이 들어온 걸 확인한 후엔 False로 변경하세요!)
+# 💡 디스코드에 미국 주식 2종목이 정상 출력되는 걸 확인하시면 꼭 False로 변경하세요!
 FORCE_RESET_SHEET = True  
 
 # 🌟 1. 환경 변수 로드
@@ -41,7 +41,6 @@ KIS_URL = "https://openapivts.koreainvestment.com:29443"
 kr_time = datetime.now(pytz.timezone('Asia/Seoul'))
 today_str = kr_time.strftime('%Y-%m-%d')
 
-# 💡 실시간 환율 동적 조회
 EXCHANGE_RATE = 1350.0
 try:
     ex_df = fdr.DataReader('USD/KRW', start=(kr_time - timedelta(days=7)).strftime('%Y-%m-%d'))
@@ -114,7 +113,7 @@ def execute_order(ticker, qty, side="BUY", price=0.0):
 # ==========================================
 INITIAL_CAPITAL = 500000         
 POSITION_SIZE_RATIO = 0.25       
-MAX_PRICE_LIMIT = 130000         
+MAX_PRICE_LIMIT = 150000         
 MAX_POSITIONS = 4                
 MAX_KR_POSITIONS = 2             
 MAX_US_POSITIONS = 2             
@@ -134,7 +133,7 @@ bot_cash = INITIAL_CAPITAL
 cooldown_tracker = {} 
 yearly_us_profit = 0
 current_year = kr_time.year
-us_balance_error_log = "" # 미국장 통신 에러 기록용
+us_balance_error_log = "" 
 
 def check_macro_regime(index_ticker):
     try:
@@ -149,7 +148,6 @@ def check_macro_regime(index_ticker):
 
 macro_bull = {'KR': check_macro_regime('KQ11'), 'US': check_macro_regime('^GSPC')}
 
-# 구글 시트 DB 불러오기 및 강제 초기화 로직
 if SHEET_WEBHOOK_URL:
     for attempt in range(3):
         try:
@@ -160,7 +158,6 @@ if SHEET_WEBHOOK_URL:
                     data = json.loads(raw_text)
                     if isinstance(data, dict): 
                         if FORCE_RESET_SHEET:
-                            print("⚠️ [강제 초기화 작동] 기존 시트 데이터를 백지화하고 증권사 실시간 잔고로 덮어씁니다.")
                             portfolio = {}
                             cooldown_tracker = {}
                             bot_cash = INITIAL_CAPITAL
@@ -183,7 +180,7 @@ for t, expire_date in cooldown_tracker.items():
     except: pass
 cooldown_tracker = active_cooldowns
 
-# 💡 [핵심 버그 픽스] 잔고 이중 검증 및 미국장 모의투자 잔고 인식 패치
+# 💡 잔고 이중 검증 및 미국장 모의투자 API 픽스
 def sync_portfolio_with_kis_balance(current_portfolio):
     global bot_cash, us_balance_error_log
     if not kis_token: return current_portfolio
@@ -211,23 +208,31 @@ def sync_portfolio_with_kis_balance(current_portfolio):
                     kr_tickers[code] = {'name': name, 'qty': qty, 'avg_price': float(item.get('pchs_avg_pric', 0))}
     except: pass
 
-    # 2. 💡 미국장 잔고 조회 (모의투자 버그 우회를 위해 원화(01)/외화(02) 계좌 양방향 스캔)
-    for crcy in ["01", "02"]:
+    # 2. 💡 미국장 잔고 조회 (3대 거래소 각각 스캔 - OVRS_EXCG_CD 규격 완벽 대응)
+    for excg in ["NAS", "NYS", "AMS"]:
         try: 
             headers["tr_id"] = f"{tr_prefix}TTS3012R"
-            params = {"CANO": cano, "ACNT_PRDT_CD": prdt_cd, "WCRC_FRCR_DVSN_CD": crcy, "NATN_CD": "840", "TR_MKET_CD": "00", "INQR_DVSN_CD": "00"}
+            params = {
+                "CANO": cano, 
+                "ACNT_PRDT_CD": prdt_cd, 
+                "OVRS_EXCG_CD": excg,  # 👈 필수 파라미터
+                "TR_CRCY_CD": "USD",   # 👈 필수 파라미터
+                "CTX_AREA_FK200": "", 
+                "CTX_AREA_NK200": ""
+            }
             res = requests.get(f"{KIS_URL}/uapi/overseas-stock/v1/trading/inquire-present-balance", headers=headers, params=params, timeout=10)
             data = res.json()
             if data.get('rt_cd') == '0':
                 us_api_success = True
                 for item in data.get('output1', []):
-                    # 모의투자는 필드명이 꼬이는 경우가 있어 다중 체크
                     qty = float(item.get('ccld_qty_smtl1', 0))
                     if qty == 0: qty = float(item.get('ord_psbl_qty', 0))
                     if qty == 0: qty = float(item.get('cblc_qty13', 0))
                     
                     if qty > 0:
                         sym = item.get('ovrs_pdno', '').replace('.', '-').replace('/', '-')
+                        if sym == 'BAX': continue # 블랙리스트 처리된 종목 제외
+                        
                         name = item.get('ovrs_item_name', item.get('prdt_name', sym))
                         if sym: us_tickers[sym] = {'name': name, 'qty': int(qty), 'avg_price': float(item.get('pchs_avg_pric', 0))}
             else:
@@ -241,7 +246,6 @@ def sync_portfolio_with_kis_balance(current_portfolio):
         clean_t = t.split('.')[0]
         is_kr = t.endswith('.KS') or t.endswith('.KQ')
         
-        # 장중 손절 감지 처리
         if is_kr and kr_api_success and (clean_t not in kr_tickers and t not in kr_tickers):
             sell_signals.append(f"🔪 서버 장중 손절 감지: {p.get('name')} (현금 회수 완료)")
             bot_cash += (p['units'] * p['buy_price'] * (1 - FIXED_STOP_LOSS_KR) * (1 - KR_FEE - KR_KOSPI_TAX))
@@ -254,7 +258,6 @@ def sync_portfolio_with_kis_balance(current_portfolio):
             cooldown_tracker[t] = (kr_time + timedelta(days=5)).strftime('%Y-%m-%d')
             continue
             
-        # 기존 종목 업데이트
         if is_kr:
             if not kr_api_success: 
                 synced[t] = p; continue
@@ -272,7 +275,6 @@ def sync_portfolio_with_kis_balance(current_portfolio):
             synced[t] = p
             del us_tickers[match_k] 
 
-    # 💡 봇이 모르던 '새로운 종목'을 발견하면 포트폴리오에 강제 주입
     if us_api_success:
         for sym, data in us_tickers.items(): 
             synced[sym] = {'name': data['name'], 'units': data['qty'], 'buy_price': data['avg_price'], 'market': 'US', 'buy_date': today_str, 'hold_days': 0}
@@ -280,7 +282,6 @@ def sync_portfolio_with_kis_balance(current_portfolio):
         for code, data in kr_tickers.items(): 
             synced[f"{code}.KS"] = {'name': data['name'], 'units': data['qty'], 'buy_price': data['avg_price'], 'market': 'KR_KOSPI', 'buy_date': today_str, 'hold_days': 0}
     
-    # 강제 초기화 시 현금 재계산
     if FORCE_RESET_SHEET:
         invested = sum(p['buy_price'] * p['units'] * (1 if str(p['market']).startswith('KR') else EXCHANGE_RATE) for p in synced.values())
         bot_cash = INITIAL_CAPITAL - invested
@@ -341,7 +342,7 @@ data_store, prices_cache = {}, {}
 fdr_start_date = (kr_time - timedelta(days=250)).strftime('%Y-%m-%d')
 error_count = 0
 
-print(f"⚡ 전체 시장 데이터({len(all_stocks)}개) 스텔스 스캔 중... (휴먼 모드 가동)")
+print(f"⚡ 전체 시장 데이터 스텔스 스캔 중... (휴먼 모드 가동)")
 
 shuffled_stocks = list(all_stocks.items())
 random.shuffle(shuffled_stocks)
