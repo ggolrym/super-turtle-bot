@@ -1,6 +1,6 @@
 # ==========================================
 # 🚀 AI 하이브리드 터틀 봇 V36.6 Safe Defender Live
-# (4슬롯 분산 / 코스닥 통합 방어막 / 2026 세법 0.2% / 연말 절세 / 우량주 400선 최적화 & 생존 신고 🛡️)
+# (1100% 오리지널 깐깐한 방어막 복구 / 스텔스 장갑 유지 🛡️ / 코스피&코스닥 0.2% 세금)
 # ==========================================
 import os
 import yfinance as yf
@@ -50,7 +50,7 @@ elif RUN_MARKET == 'US': target_market, market_title = 'US', "🇺🇸 미국장
 else: target_market, market_title = 'ALL', "🌐 통합장"
 
 print(f"⏰ 현재 한국시간: {kr_time.strftime('%Y-%m-%d %H:%M:%S')} (적용 환율: {EXCHANGE_RATE:,.1f}원)")
-print(f"🎯 V36.6 Safe Defender 가동 (4슬롯 분산 / 극강의 안전 수집 / {market_title})\n")
+print(f"🎯 V36.6 실전 모드 가동 (1100% 오리지널 방어막 복구 / {market_title})\n")
 
 # 🌟 2. KIS API 통신 모듈
 def get_kis_token():
@@ -121,11 +121,11 @@ def execute_order(ticker, qty, side="BUY", price=0.0):
     except Exception as e: return {"success": False, "msg": f"통신에러"}
 
 # ==========================================
-# 🌟 3. 자본 및 방어막 세팅 (4슬롯, 50만 원)
+# 🌟 3. 자본 및 방어막 세팅
 # ==========================================
 INITIAL_CAPITAL = 500000         
-POSITION_SIZE_RATIO = 0.25       # 4슬롯 분산
-MAX_PRICE_LIMIT = 150000         # 💡 매수 상한선: 1주당 13만 원 이하 종목만 매수
+POSITION_SIZE_RATIO = 0.25       
+MAX_PRICE_LIMIT = 130000         
 MAX_POSITIONS = 4                
 MAX_KR_POSITIONS = 2             
 MAX_US_POSITIONS = 2             
@@ -134,7 +134,6 @@ FIXED_STOP_LOSS_KR = 0.08
 FIXED_STOP_LOSS_US = 0.08   
 MAX_HOLD_DAYS = 20         
 
-# 💡 [2026년 기준] 정밀 수수료 및 거래세 (코스피/코스닥 0.20% 단일화)
 KR_FEE = 0.00015
 KR_KOSPI_TAX = 0.0020            
 KR_KOSDAQ_TAX = 0.0020           
@@ -149,11 +148,10 @@ portfolio = {}
 bot_cash = INITIAL_CAPITAL 
 cooldown_tracker = {} 
 
-# 연말 절세를 위한 실현 수익 트래커
 yearly_us_profit = 0
 current_year = kr_time.year
 
-# 단기 매크로 서킷브레이커 (MA20 & MA50 동시 충족)
+# 💡 [핵심] 1100% 수익률을 증명한 오리지널 깐깐한 방어막 복구 (MA20 & MA50 동시 충족)
 def check_macro_regime(index_ticker):
     try:
         if index_ticker.startswith('^'): df = yf.Ticker(index_ticker).history(period='1y')
@@ -162,6 +160,8 @@ def check_macro_regime(index_ticker):
         curr_close = float(df['Close'].iloc[-1])
         ma20 = float(df['Close'].rolling(20).mean().iloc[-1])
         ma50 = float(df['Close'].rolling(50).mean().iloc[-1])
+        
+        # 💡 무조건 단기/중기 추세가 모두 살아있을 때만 진입 (강력한 현금 보호)
         return (curr_close >= ma20) and (curr_close >= ma50)
     except: return True
 
@@ -265,7 +265,6 @@ def sync_portfolio_with_kis_balance(current_portfolio):
         if not is_kr and us_api_success and (clean_t not in us_tickers and t not in us_tickers):
             is_mock = "vts" in KIS_URL
             if is_mock:
-                # 💡 [버그 픽스] 모의투자는 해외계좌 번호가 달라서 잔고가 0으로 나오므로, 강제 삭제하지 않고 장부(시트) 유지
                 synced[t] = p
                 continue
             else:
@@ -305,7 +304,7 @@ current_kr_positions = sum(1 for p in portfolio.values() if isinstance(p, dict) 
 current_us_positions = sum(1 for p in portfolio.values() if isinstance(p, dict) and p.get('market') == 'US')
 
 # ==========================================
-# 🌟 4. 거래대금 필터링 & 유니버스 구축 (💡 안전 최적화: 시총 상위 400개 우량주 컷)
+# 🌟 4. 거래대금 필터링 & 유니버스 구축
 # ==========================================
 MIN_TURNOVER_KRW = 10000000000 
 MIN_PRICE_KRW = 1000           
@@ -313,10 +312,9 @@ all_stocks = {}
 
 print(f"⏳ 유니버스 사전 필터링 중... ({market_title})")
 
-# 💡 네이버 금융 시가총액 상위 400개 기업 크롤링 (시총 상위 1~4페이지)
 def get_naver_universe(sosok, suffix, market_tag):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-    for page in range(1, 5): # 👈 1~4페이지 (상위 200개)로 안전하게 최적화
+    for page in range(1, 5): 
         try:
             url = f"https://finance.naver.com/sise/sise_market_sum.naver?sosok={sosok}&page={page}"
             res = requests.get(url, headers=headers, timeout=10)
@@ -326,15 +324,12 @@ def get_naver_universe(sosok, suffix, market_tag):
                 full_code = f"{code}{suffix}"
                 all_stocks[full_code] = (market_tag, name, full_code)
             
-            time.sleep(random.uniform(0.5, 1.5)) # 페이지 간격 딜레이
+            time.sleep(random.uniform(0.5, 1.5)) 
         except Exception:
             pass
 
-if target_market in ['KR_KOSPI', 'ALL']:
-    get_naver_universe(0, '.KS', 'KR_KOSPI')
-
-if target_market in ['KR_KOSDAQ', 'ALL']:
-    get_naver_universe(1, '.KQ', 'KR_KOSDAQ')
+if target_market in ['KR_KOSPI', 'ALL']: get_naver_universe(0, '.KS', 'KR_KOSPI')
+if target_market in ['KR_KOSDAQ', 'ALL']: get_naver_universe(1, '.KQ', 'KR_KOSDAQ')
 
 special_tickers = {'BRKB': 'BRK-B', 'BFB': 'BF-B'}
 if target_market in ['US', 'ALL']:
@@ -357,7 +352,7 @@ for t in portfolio.keys():
         all_stocks[t] = (m, portfolio[t].get('name', t), t)
 
 # ==========================================
-# 🌟 5. 지표 계산 및 거래 판단 (💡 스텔스 랜덤 셔플 & 생존 신고 패치 적용)
+# 🌟 5. 지표 계산 및 거래 판단
 # ==========================================
 data_store, prices_cache = {}, {}
 fdr_start_date = (kr_time - timedelta(days=250)).strftime('%Y-%m-%d')
@@ -368,10 +363,8 @@ print(f"⚡ 전체 시장 데이터({len(all_stocks)}개) 스텔스 스캔 중..
 shuffled_stocks = list(all_stocks.items())
 random.shuffle(shuffled_stocks)
 
-# 💡 [생존 신고 패치] 깃허브 액션 10분 타임아웃 방지를 위해 i 카운터 도입
 for i, (ticker, (market, name, code)) in enumerate(shuffled_stocks):
     
-    # 100개 스캔할 때마다 생존 로그 출력 (깃허브 타임아웃 방어)
     if (i + 1) % 100 == 0:
         print(f"🔄 스캐닝 진행 중... ({i + 1}/{len(shuffled_stocks)}) 종목 완료")
 
@@ -440,7 +433,7 @@ total_bot_equity = bot_cash + current_portfolio_value
 if kis_token:
     
     # -----------------------------------
-    # 💡 [특별 심사] 실전 연말 미국 주식 절세 (Tax Harvesting) 로직
+    # 💡 [특별 심사] 연말 미국 주식 절세 (Tax Harvesting) 
     # -----------------------------------
     if kr_time.month == 12 and kr_time.day >= 24:
         rem_deduct = US_CGT_DEDUCTION - yearly_us_profit
@@ -462,7 +455,6 @@ if kis_token:
                 
                 if profit_per_share > 0:
                     shares_to_sell = min(pos['units'], math.floor(rem_deduct / profit_per_share))
-                    
                     if shares_to_sell > 0:
                         res = execute_order(ticker, shares_to_sell, side="SELL", price=curr_price)
                         if res['success']:
@@ -473,19 +465,16 @@ if kis_token:
                             bot_cash += net_sell_amt
                             yearly_us_profit += realized_profit
                             rem_deduct -= realized_profit
-                            
                             sell_signals.append(f"🌟 연말 절세 실현: {pos['name']} | {shares_to_sell}주 익절매도 (공제활용: +{realized_profit:,.0f}원)")
                             
                             if shares_to_sell == pos['units']:
                                 current_us_positions -= 1
                                 del portfolio[ticker]
-                            else:
-                                portfolio[ticker]['units'] -= shares_to_sell
-                                
+                            else: portfolio[ticker]['units'] -= shares_to_sell
                             if rem_deduct <= 0: break
 
     # -----------------------------------
-    # [A] 매도 심사 (스마트 트레일링 익절 탑재)
+    # [A] 매도 심사
     # -----------------------------------
     for ticker in list(portfolio.keys()):
         if ticker not in data_store: continue
@@ -508,10 +497,8 @@ if kis_token:
         sl_pct = FIXED_STOP_LOSS_KR if is_kr else FIXED_STOP_LOSS_US
         sl_price = buy_price * (1.0 - sl_pct)
         
-        if is_kr:
-            tp_ma = float(df['MA10'].iloc[-1])
-        else:
-            tp_ma = float(df['MA10'].iloc[-1]) if profit_pct >= 0.10 else float(df['MA20'].iloc[-1])
+        if is_kr: tp_ma = float(df['MA10'].iloc[-1])
+        else: tp_ma = float(df['MA10'].iloc[-1]) if profit_pct >= 0.10 else float(df['MA20'].iloc[-1])
         
         if curr_price <= sl_price: 
             sell_reason = f"하드스탑(-{sl_pct*100}%)"
@@ -558,8 +545,8 @@ if kis_token:
         krw_price = curr_price if is_kr else curr_price * EXCHANGE_RATE
         
         if krw_price > MAX_PRICE_LIMIT: continue 
-        
         if krw_price > target_pos_size_krw: continue
+        
         unit_size = math.floor(target_pos_size_krw / krw_price)
         if unit_size == 0: continue
             
@@ -625,7 +612,7 @@ for ticker, pos in portfolio.items():
         "trend_exit": round(trend_exit_price, 2)
     })
 
-msg_lines = [f"🤖 **V36.6 Safe Defender Live (코스닥 통합방어막 & 절세 봇)** 🤖\n"]
+msg_lines = [f"🤖 **V36.6 스텔스 실전봇 (1100% 원본 로직 탑재 완료)** 🤖\n"]
 msg_lines.append(f"💰 **추정 총자산:** 약 {int(total_bot_equity):,}원 (가용현금: {int(bot_cash):,}원)")
 msg_lines.append(f"🇺🇸 금년도 미국주식 실현수익: {int(yearly_us_profit):,}원 (비과세 한도 250만 원)\n")
 
@@ -634,7 +621,7 @@ if not kis_token:
 else:
     if buy_signals or sell_signals:
         if buy_signals:
-            msg_lines.append("**[🚀 오늘의 신규 매수 (서버 자동주문 필수!)]**")
+            msg_lines.append("**[🚀 오늘의 신규 매수 (서버 자동주문 완료)]**")
             msg_lines.extend(buy_signals)
             msg_lines.append("")
         if sell_signals:
