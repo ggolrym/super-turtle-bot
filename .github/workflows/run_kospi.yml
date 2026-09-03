@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: turtle-bot-run
+  group: kospi-bot-run
   cancel-in-progress: true # 💡 [수정] 이전 작업이 멈춰있으면 자비 없이 강제 취소
 
 jobs:
