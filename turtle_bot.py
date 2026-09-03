@@ -263,11 +263,17 @@ def sync_portfolio_with_kis_balance(current_portfolio):
             continue
             
         if not is_kr and us_api_success and (clean_t not in us_tickers and t not in us_tickers):
-            print(f"⚠️ {t} 잔고 없음 (장중 서버 자동손절 감지) ➔ 쿨다운 5일 적용")
-            sell_signals.append(f"🔪 서버 장중 손절 감지: {p.get('name')} (현금 회수 완료)")
-            bot_cash += (p['units'] * p['buy_price'] * (1 - FIXED_STOP_LOSS_US) * (1 - US_FEE - US_SEC_FEE) * EXCHANGE_RATE)
-            cooldown_tracker[t] = (kr_time + timedelta(days=5)).strftime('%Y-%m-%d')
-            continue
+            is_mock = "vts" in KIS_URL
+            if is_mock:
+                # 💡 [버그 픽스] 모의투자는 해외계좌 번호가 달라서 잔고가 0으로 나오므로, 강제 삭제하지 않고 장부(시트) 유지
+                synced[t] = p
+                continue
+            else:
+                print(f"⚠️ {t} 잔고 없음 (장중 서버 자동손절 감지) ➔ 쿨다운 5일 적용")
+                sell_signals.append(f"🔪 서버 장중 손절 감지: {p.get('name')} (현금 회수 완료)")
+                bot_cash += (p['units'] * p['buy_price'] * (1 - FIXED_STOP_LOSS_US) * (1 - US_FEE - US_SEC_FEE) * EXCHANGE_RATE)
+                cooldown_tracker[t] = (kr_time + timedelta(days=5)).strftime('%Y-%m-%d')
+                continue
             
         if is_kr:
             if not kr_api_success: 
