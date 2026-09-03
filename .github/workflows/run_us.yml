@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: turtle-bot-run
+  group: us-bot-run
   cancel-in-progress: false
 
 jobs:
