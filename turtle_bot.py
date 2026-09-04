@@ -558,7 +558,7 @@ if kis_token:
                 us_candidates.append({'ticker': ticker, 'name': name, 'market': market, 'price': curr_price, 'units': unit_size, 'krw_price': krw_price, 'score': (curr_price / ma_120)})
         elif is_kr:
             rsi_2 = float(df['RSI_2'].iloc[-1])
-            if curr_price > ma_120 and rsi_2 < 10.0:
+            if curr_price > ma_120 and rsi_2 < 30.0:
                 kr_candidates.append({'ticker': ticker, 'name': name, 'market': market, 'price': curr_price, 'units': unit_size, 'krw_price': krw_price, 'score': rsi_2})
 
     us_candidates.sort(key=lambda x: x['score'], reverse=True) 
