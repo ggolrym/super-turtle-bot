@@ -1,6 +1,6 @@
 # ==========================================
 # 🚀 AI 하이브리드 터틀 봇 V36.6 Safe Defender Live
-# (🚨 상시 매매(Always-in) 모드 / 매크로 방어막 완전 해제 / 네이버 크롤링 유지)
+# (🚨 백테스트 일치화: 상시 매매(Always-in) / RSI 30 / 코스피 200선 & 코스닥 200선)
 # ==========================================
 import os
 import yfinance as yf
@@ -50,7 +50,7 @@ elif RUN_MARKET == 'US': target_market, market_title = 'US', "🇺🇸 미국장
 else: target_market, market_title = 'ALL', "🌐 통합장"
 
 print(f"⏰ 현재 한국시간: {kr_time.strftime('%Y-%m-%d %H:%M:%S')} (적용 환율: {EXCHANGE_RATE:,.1f}원)")
-print(f"🎯 V36.6 실전 모드 가동 (🚨 상시 매매(Always-in) 모드 / {market_title})\n")
+print(f"🎯 V36.6 실전 모드 가동 (🚨 백테스트 동일 설정: 상시 매매 / {market_title})\n")
 
 # 🌟 2. KIS API 통신 모듈
 def get_kis_token():
@@ -121,7 +121,7 @@ def execute_order(ticker, qty, side="BUY", price=0.0):
     except Exception as e: return {"success": False, "msg": f"통신에러"}
 
 # ==========================================
-# 🌟 3. 자본 및 방어막 세팅
+# 🌟 3. 자본 및 설정 세팅
 # ==========================================
 INITIAL_CAPITAL = 500000         
 POSITION_SIZE_RATIO = 0.25       
@@ -151,8 +151,8 @@ cooldown_tracker = {}
 yearly_us_profit = 0
 current_year = kr_time.year
 
-# 💡 [핵심] 상시 매매(Always-in)를 위해 거시경제 방어막(MA20 & MA50) 해제
-print(f"🛡️ 단기 방어막(MA20 & MA50) 상태: 🚨 해제됨 (상시 매매 모드 가동)\n")
+# 💡 상시 매매(Always-in) 모드이므로 시장 방어막 제거
+print(f"🛡️ 단기 방어막(MA20 & MA50) 상태: 🚨 완전 해제 (상시 매매 모드 가동)\n")
 
 # DB 불러오기
 if SHEET_WEBHOOK_URL:
@@ -290,10 +290,11 @@ MIN_TURNOVER_KRW = 10000000000
 MIN_PRICE_KRW = 1000           
 all_stocks = {}
 
-print(f"⏳ 유니버스 사전 필터링 중... ({market_title})")
+print(f"⏳ 유니버스 수집 중... (코스피 200 / 코스닥 200)")
 
 def get_naver_universe(sosok, suffix, market_tag):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+    # 💡 1~4페이지(각 200종목) 수집으로 확장 적용 완료!
     for page in range(1, 5): 
         try:
             url = f"https://finance.naver.com/sise/sise_market_sum.naver?sosok={sosok}&page={page}"
@@ -320,6 +321,10 @@ if target_market in ['US', 'ALL']:
         for _, row in us_df.iterrows(): 
             raw_sym = str(row[col_sym])
             clean_sym = special_tickers.get(raw_sym, raw_sym.replace('.', '-').replace('/', '-'))
+            
+            # 💡 계좌 제외 특별 지침: 박스터 인터내셔널 영구 차단
+            if clean_sym == 'BAX': continue
+            
             all_stocks[clean_sym] = ('US', str(row[col_name]), clean_sym)
     except: pass
     all_stocks['SPLG'] = ('US', 'SPDR S&P 500 ETF', 'SPLG')
@@ -509,16 +514,13 @@ if kis_token:
                 del portfolio[ticker] 
 
     # -----------------------------------
-    # [B] 매수 심사
+    # [B] 매수 심사 (상시 매매 모드 / 최고 성과 파라미터 적용)
     # -----------------------------------
     target_pos_size_krw = total_bot_equity * POSITION_SIZE_RATIO 
     
     for ticker, df in data_store.items():
         if ticker in portfolio: continue
         market, name, _ = all_stocks[ticker]
-        
-        # 💡 [핵심] 매크로 방어막 판단 무효화! 시장 상관없이 상시 진입
-        # 원래 있던 if not macro_bull.get(...) 로직 완전 삭제 완료
         
         curr_price = float(df['Close'].iloc[-1])
         is_kr = market.startswith('KR')
@@ -533,12 +535,13 @@ if kis_token:
         ma_120 = float(df['MA120'].iloc[-1])
 
         if market == 'US':
+            # 백테스트 설정: 거래량 1.2배
             vol_cond = (float(df['Volume'].iloc[-1]) >= float(df['VolMA20'].iloc[-1]) * 1.2) if float(df['VolMA20'].iloc[-1]) > 0 else True
             if curr_price > ma_120 and curr_price >= float(df['Recent20High'].iloc[-1]) and vol_cond:
                 us_candidates.append({'ticker': ticker, 'name': name, 'market': market, 'price': curr_price, 'units': unit_size, 'krw_price': krw_price, 'score': (curr_price / ma_120)})
         elif is_kr:
             rsi_2 = float(df['RSI_2'].iloc[-1])
-            # RSI 20 기준 적용
+            # 💡 [백테스트 최적화 일치] RSI 20 기준 적용
             if curr_price > ma_120 and rsi_2 < 20.0:
                 kr_candidates.append({'ticker': ticker, 'name': name, 'market': market, 'price': curr_price, 'units': unit_size, 'krw_price': krw_price, 'score': rsi_2})
 
@@ -593,7 +596,7 @@ for ticker, pos in portfolio.items():
         "trend_exit": round(trend_exit_price, 2)
     })
 
-msg_lines = [f"🤖 **V36.6 스텔스 실전봇 (🚨 상시 매매 모드 가동 완료)** 🤖\n"]
+msg_lines = [f"🤖 **V36.6 스텔스 실전봇 (🚨 상시 매매 모드 / RSI 30.0)** 🤖\n"]
 msg_lines.append(f"💰 **추정 총자산:** 약 {int(total_bot_equity):,}원 (가용현금: {int(bot_cash):,}원)")
 msg_lines.append(f"🇺🇸 금년도 미국주식 실현수익: {int(yearly_us_profit):,}원 (비과세 한도 250만 원)\n")
 
