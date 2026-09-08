@@ -1,6 +1,6 @@
 # ==========================================
 # 🚀 AI 하이브리드 터틀 봇 V36.6 Safe Defender Live
-# (1100% 오리지널 깐깐한 방어막 복구 / 스텔스 장갑 유지 🛡️ / 코스피&코스닥 0.2% 세금)
+# (🚨 상시 매매(Always-in) 모드 / 매크로 방어막 완전 해제 / 네이버 크롤링 유지)
 # ==========================================
 import os
 import yfinance as yf
@@ -50,7 +50,7 @@ elif RUN_MARKET == 'US': target_market, market_title = 'US', "🇺🇸 미국장
 else: target_market, market_title = 'ALL', "🌐 통합장"
 
 print(f"⏰ 현재 한국시간: {kr_time.strftime('%Y-%m-%d %H:%M:%S')} (적용 환율: {EXCHANGE_RATE:,.1f}원)")
-print(f"🎯 V36.6 실전 모드 가동 (1100% 오리지널 방어막 복구 / {market_title})\n")
+print(f"🎯 V36.6 실전 모드 가동 (🚨 상시 매매(Always-in) 모드 / {market_title})\n")
 
 # 🌟 2. KIS API 통신 모듈
 def get_kis_token():
@@ -151,28 +151,8 @@ cooldown_tracker = {}
 yearly_us_profit = 0
 current_year = kr_time.year
 
-# 💡 [핵심] 1100% 수익률을 증명한 오리지널 깐깐한 방어막 복구 (MA20 & MA50 동시 충족)
-def check_macro_regime(index_ticker):
-    try:
-        if index_ticker.startswith('^'): df = yf.Ticker(index_ticker).history(period='1y')
-        else: df = fdr.DataReader(index_ticker, start=(kr_time - timedelta(days=150)).strftime('%Y-%m-%d'))
-        if df.empty or len(df) < 50: return True
-        curr_close = float(df['Close'].iloc[-1])
-        ma20 = float(df['Close'].rolling(20).mean().iloc[-1])
-        ma50 = float(df['Close'].rolling(50).mean().iloc[-1])
-        
-        # 💡 무조건 단기/중기 추세가 모두 살아있을 때만 진입 (강력한 현금 보호)
-        return (curr_close >= ma20) and (curr_close >= ma50)
-    except: return True
-
-macro_bull = {
-    'KR': check_macro_regime('KQ11'),
-    'US': check_macro_regime('^GSPC')
-}
-
-print(f"🛡️ 단기 방어막(MA20 & MA50) 상태:")
-print(f" - KR(한국장 전체): {'🟢 안전' if macro_bull['KR'] else '🔴 하락장 방어 중'}")
-print(f" - US(미국장 전체): {'🟢 안전' if macro_bull['US'] else '🔴 하락장 방어 중'}\n")
+# 💡 [핵심] 상시 매매(Always-in)를 위해 거시경제 방어막(MA20 & MA50) 해제
+print(f"🛡️ 단기 방어막(MA20 & MA50) 상태: 🚨 해제됨 (상시 매매 모드 가동)\n")
 
 # DB 불러오기
 if SHEET_WEBHOOK_URL:
@@ -537,8 +517,8 @@ if kis_token:
         if ticker in portfolio: continue
         market, name, _ = all_stocks[ticker]
         
-        m_key = 'US' if market == 'US' else 'KR'
-        if not macro_bull.get(m_key, True): continue 
+        # 💡 [핵심] 매크로 방어막 판단 무효화! 시장 상관없이 상시 진입
+        # 원래 있던 if not macro_bull.get(...) 로직 완전 삭제 완료
         
         curr_price = float(df['Close'].iloc[-1])
         is_kr = market.startswith('KR')
@@ -558,6 +538,7 @@ if kis_token:
                 us_candidates.append({'ticker': ticker, 'name': name, 'market': market, 'price': curr_price, 'units': unit_size, 'krw_price': krw_price, 'score': (curr_price / ma_120)})
         elif is_kr:
             rsi_2 = float(df['RSI_2'].iloc[-1])
+            # RSI 30 기준 적용
             if curr_price > ma_120 and rsi_2 < 30.0:
                 kr_candidates.append({'ticker': ticker, 'name': name, 'market': market, 'price': curr_price, 'units': unit_size, 'krw_price': krw_price, 'score': rsi_2})
 
@@ -612,7 +593,7 @@ for ticker, pos in portfolio.items():
         "trend_exit": round(trend_exit_price, 2)
     })
 
-msg_lines = [f"🤖 **V36.6 스텔스 실전봇 (1100% 원본 로직 탑재 완료)** 🤖\n"]
+msg_lines = [f"🤖 **V36.6 스텔스 실전봇 (🚨 상시 매매 모드 가동 완료)** 🤖\n"]
 msg_lines.append(f"💰 **추정 총자산:** 약 {int(total_bot_equity):,}원 (가용현금: {int(bot_cash):,}원)")
 msg_lines.append(f"🇺🇸 금년도 미국주식 실현수익: {int(yearly_us_profit):,}원 (비과세 한도 250만 원)\n")
 
