@@ -1,6 +1,6 @@
 # ==========================================
 # 🚀 AI 하이브리드 터틀 봇 V36.6 Safe Defender Live
-# (🚨 상시 매매 / HTS 표준 RSI / 💡 최소 5% 수익 보장 스마트 익절 패치)
+# (🚨 백테스트 일치화: 상시 매매(Always-in) / RSI 20 / 코스피 200선 & 코스닥 200선)
 # ==========================================
 import os
 import yfinance as yf
@@ -50,7 +50,7 @@ elif RUN_MARKET == 'US': target_market, market_title = 'US', "🇺🇸 미국장
 else: target_market, market_title = 'ALL', "🌐 통합장"
 
 print(f"⏰ 현재 한국시간: {kr_time.strftime('%Y-%m-%d %H:%M:%S')} (적용 환율: {EXCHANGE_RATE:,.1f}원)")
-print(f"🎯 V36.6 실전 모드 가동 (🚨 상시 매매 / 스마트 최소 익절 5% / {market_title})\n")
+print(f"🎯 V36.6 실전 모드 가동 (🚨 백테스트 동일 설정: 상시 매매 / {market_title})\n")
 
 # 🌟 2. KIS API 통신 모듈
 def get_kis_token():
@@ -144,11 +144,6 @@ US_SEC_FEE = 0.0000206
 US_CGT_RATE = 0.22               
 US_CGT_DEDUCTION = 2500000       
 
-RSI_PERIOD = 5      
-RSI_LIMIT = 20.0    
-# 💡 [핵심 스위치] 스마트 익절을 발동하기 위한 최소 수익률 (5%)
-MIN_PROFIT_MARGIN = 0.05 
-
 buy_signals, sell_signals = [], []
 dashboard_list = [] 
 portfolio = {}
@@ -180,7 +175,7 @@ if SHEET_WEBHOOK_URL:
                         else:
                             yearly_us_profit = 0 
                             
-                        if 'bot_cash' in data and not HARD_SYNC_ACCOUNT: 
+                        if 'bot_cash' in data: 
                             bot_cash = float(data['bot_cash'])
                         else:
                             invested = sum(p.get('buy_price', 0) * p.get('units', 0) * (1 if str(p.get('market', '')).startswith('KR') else EXCHANGE_RATE) for p in portfolio.values() if isinstance(p, dict))
@@ -236,21 +231,6 @@ def sync_portfolio_with_kis_balance(current_portfolio):
 
     global bot_cash
     synced = {}
-    
-    if HARD_SYNC_ACCOUNT and (kr_api_success or us_api_success):
-        total_invested_krw = 0
-        if kr_api_success:
-            for code, data in kr_tickers.items():
-                synced[f"{code}.KS"] = {'name': code, 'units': data['qty'], 'buy_price': data['avg_price'], 'market': 'KR_KOSPI', 'buy_date': today_str, 'hold_days': 0}
-                total_invested_krw += (data['qty'] * data['avg_price'])
-        if us_api_success:
-            for sym, data in us_tickers.items():
-                synced[sym] = {'name': sym, 'units': data['qty'], 'buy_price': data['avg_price'], 'market': 'US', 'buy_date': today_str, 'hold_days': 0}
-                total_invested_krw += (data['qty'] * data['avg_price'] * EXCHANGE_RATE)
-        
-        bot_cash = INITIAL_CAPITAL - total_invested_krw
-        return synced
-
     for t, p in current_portfolio.items():
         if not isinstance(p, dict): continue 
         clean_t = t.split('.')[0]
@@ -316,6 +296,7 @@ print(f"⏳ 유니버스 수집 중... (코스피 200 / 코스닥 200)")
 
 def get_naver_universe(sosok, suffix, market_tag):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+    # 💡 1~4페이지(각 200종목) 수집으로 확장 적용 완료!
     for page in range(1, 5): 
         try:
             url = f"https://finance.naver.com/sise/sise_market_sum.naver?sosok={sosok}&page={page}"
@@ -343,6 +324,7 @@ if target_market in ['US', 'ALL']:
             raw_sym = str(row[col_sym])
             clean_sym = special_tickers.get(raw_sym, raw_sym.replace('.', '-').replace('/', '-'))
             
+            # 💡 계좌 제외 특별 지침: 박스터 인터내셔널 영구 차단
             if clean_sym == 'BAX': continue
             
             all_stocks[clean_sym] = ('US', str(row[col_name]), clean_sym)
@@ -355,7 +337,6 @@ for t in portfolio.keys():
     if t not in all_stocks:
         m = 'KR_KOSPI' if t.endswith('.KS') else 'KR_KOSDAQ' if t.endswith('.KQ') else 'US'
         all_stocks[t] = (m, portfolio[t].get('name', t), t)
-        portfolio[t]['name'] = portfolio[t].get('name', t)
 
 # ==========================================
 # 🌟 5. 지표 계산 및 거래 판단
@@ -386,7 +367,7 @@ for i, (ticker, (market, name, code)) in enumerate(shuffled_stocks):
                         stock_data = temp_data
                         break
                 except: pass
-                time.sleep(random.uniform(0.1, 0.4)) 
+                time.sleep(random.uniform(0.2, 0.6)) 
         else:
             ticker_obj = yf.Ticker(ticker)
             for _ in range(3):
@@ -396,7 +377,7 @@ for i, (ticker, (market, name, code)) in enumerate(shuffled_stocks):
                         stock_data = temp_data
                         break
                 except: pass
-                time.sleep(random.uniform(0.2, 0.6)) 
+                time.sleep(random.uniform(0.4, 0.9)) 
 
         if stock_data.empty or len(stock_data) < 120: 
             error_count += 1
@@ -412,16 +393,10 @@ for i, (ticker, (market, name, code)) in enumerate(shuffled_stocks):
         stock_data['MA120'] = stock_data['Close'].rolling(120).mean()
         stock_data['VolMA20'] = stock_data['Volume'].rolling(20).mean().shift(1)
         
-        # 💡 [HTS 표준 RSI 로직 적용됨]
         delta = stock_data['Close'].diff()
-        gain = delta.where(delta > 0, 0)
-        loss = -delta.where(delta < 0, 0)
-        
-        avg_gain = gain.ewm(alpha=1/RSI_PERIOD, adjust=False).mean()
-        avg_loss = loss.ewm(alpha=1/RSI_PERIOD, adjust=False).mean()
-        
-        rs = avg_gain / avg_loss.replace(0, float('nan'))
-        stock_data['RSI'] = (100 - (100 / (1 + rs))).fillna(50).round(2)
+        gain = (delta.where(delta > 0, 0)).rolling(2).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(2).mean()
+        stock_data['RSI_2'] = (100 - (100 / (1 + (gain / loss.replace(0, float('nan')))))).fillna(50)
         stock_data['Recent20High'] = stock_data['High'].rolling(20).max().shift(1)
         
         data_store[ticker] = stock_data.dropna()
@@ -486,7 +461,7 @@ if kis_token:
                             if rem_deduct <= 0: break
 
     # -----------------------------------
-    # [A] 매도 심사 (💡 최소 5% 수익 보장 로직 탑재)
+    # [A] 매도 심사
     # -----------------------------------
     for ticker in list(portfolio.keys()):
         if ticker not in data_store: continue
@@ -515,9 +490,9 @@ if kis_token:
         if curr_price <= sl_price: 
             sell_reason = f"하드스탑(-{sl_pct*100}%)"
             cooldown_tracker[ticker] = (kr_time + timedelta(days=5)).strftime('%Y-%m-%d')
-        # 💡 [핵심 패치] 최소 MIN_PROFIT_MARGIN (5%) 이상의 수익이 났을 때만 이평선 매도 발동!
-        elif profit_pct >= MIN_PROFIT_MARGIN and curr_price < tp_ma: 
-            sell_reason = "스마트 이평선 익절" 
+        # 💡 profit_pct가 0.05(5%) 이상일 때만 이평선 익절 로직을 가동하라!
+        elif profit_pct >= 0.05 and curr_price < tp_ma: 
+            sell_reason = "스마트 이평선 익절"
         elif hold_days >= MAX_HOLD_DAYS and curr_price <= buy_price: 
             sell_reason = "타임스탑 탈출"
                 
@@ -568,9 +543,10 @@ if kis_token:
             if curr_price > ma_120 and curr_price >= float(df['Recent20High'].iloc[-1]) and vol_cond:
                 us_candidates.append({'ticker': ticker, 'name': name, 'market': market, 'price': curr_price, 'units': unit_size, 'krw_price': krw_price, 'score': (curr_price / ma_120)})
         elif is_kr:
-            rsi_val = float(df['RSI'].iloc[-1])
-            if curr_price > ma_120 and rsi_val < RSI_LIMIT:
-                kr_candidates.append({'ticker': ticker, 'name': name, 'market': market, 'price': curr_price, 'units': unit_size, 'krw_price': krw_price, 'score': rsi_val})
+            rsi_2 = float(df['RSI_2'].iloc[-1])
+            # 💡 [백테스트 최적화 일치] RSI 20 기준 적용
+            if curr_price > ma_120 and rsi_2 < 20.0:
+                kr_candidates.append({'ticker': ticker, 'name': name, 'market': market, 'price': curr_price, 'units': unit_size, 'krw_price': krw_price, 'score': rsi_2})
 
     us_candidates.sort(key=lambda x: x['score'], reverse=True) 
     kr_candidates.sort(key=lambda x: x['score'])               
@@ -623,7 +599,7 @@ for ticker, pos in portfolio.items():
         "trend_exit": round(trend_exit_price, 2)
     })
 
-msg_lines = [f"🤖 **V36.6 스텔스 실전봇 (🚨 상시 매매 모드 / 최소 마진 {MIN_PROFIT_MARGIN*100}%)** 🤖\n"]
+msg_lines = [f"🤖 **V36.6 스텔스 실전봇 (🚨 상시 매매 모드 / RSI 30.0)** 🤖\n"]
 msg_lines.append(f"💰 **추정 총자산:** 약 {int(total_bot_equity):,}원 (가용현금: {int(bot_cash):,}원)")
 msg_lines.append(f"🇺🇸 금년도 미국주식 실현수익: {int(yearly_us_profit):,}원 (비과세 한도 250만 원)\n")
 
