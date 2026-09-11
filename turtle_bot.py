@@ -490,9 +490,8 @@ if kis_token:
         if curr_price <= sl_price: 
             sell_reason = f"하드스탑(-{sl_pct*100}%)"
             cooldown_tracker[ticker] = (kr_time + timedelta(days=5)).strftime('%Y-%m-%d')
-        # 💡 profit_pct가 0.05(5%) 이상일 때만 이평선 익절 로직을 가동하라!
-        elif profit_pct >= 0.05 and curr_price < tp_ma: 
-            sell_reason = "스마트 이평선 익절"
+        elif curr_price > buy_price and curr_price < tp_ma: 
+            sell_reason = "스마트 이평선 익절" 
         elif hold_days >= MAX_HOLD_DAYS and curr_price <= buy_price: 
             sell_reason = "타임스탑 탈출"
                 
