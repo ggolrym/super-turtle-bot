@@ -691,4 +691,4 @@ if SHEET_WEBHOOK_URL:
         else: print(f"⚠️ 구글 시트 전송 실패 (HTTP {req.status_code})")
     except Exception as e: print(f"🚨 구글 시트 통신 에러: {e}")
 
-print("🏁 봇 실행 완료 (Exit Code 0)")  이 코드는 실전용 코드이다 아까 분석했던 백테스트 코드를 참고해서 완벽하게 일치시켜달라.
+print("🏁 봇 실행 완료 (Exit Code 0)")
