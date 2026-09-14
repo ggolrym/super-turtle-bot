@@ -286,7 +286,7 @@ current_kr_positions = sum(1 for p in portfolio.values() if isinstance(p, dict) 
 current_us_positions = sum(1 for p in portfolio.values() if isinstance(p, dict) and p.get('market') == 'US')
 
 # ==========================================
-# 🌟 4. 거래대금 필터링 & 유니버스 구축
+# 🌟 4. 거래대금 필터링 & 유니버스 구축 (🚨 네이버 크롤링 실패 시 FDR 플랜 B 자동 가동!)
 # ==========================================
 MIN_TURNOVER_KRW = 10000000000 
 MIN_PRICE_KRW = 1000           
@@ -294,6 +294,7 @@ all_stocks = {}
 
 print(f"⏳ 유니버스 수집 중... (코스피 200 / 코스닥 200)")
 
+# 🟢 [플랜 A] 네이버 금융 크롤링
 def get_naver_universe(sosok, suffix, market_tag):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
     # 💡 1~4페이지(각 200종목) 수집으로 확장 적용 완료!
@@ -311,8 +312,32 @@ def get_naver_universe(sosok, suffix, market_tag):
         except Exception:
             pass
 
-if target_market in ['KR_KOSPI', 'ALL']: get_naver_universe(0, '.KS', 'KR_KOSPI')
-if target_market in ['KR_KOSDAQ', 'ALL']: get_naver_universe(1, '.KQ', 'KR_KOSDAQ')
+# 🟡 [플랜 B] FDR 시가총액 상위 추출 (해외 서버용 대체재)
+def get_fdr_fallback(market_type, suffix, market_tag, top_n=200):
+    print(f"   🔄 [플랜 B 가동] FDR 모듈로 {market_tag} 시가총액 상위 {top_n}개 우회 수집 중...")
+    try:
+        df = fdr.StockListing(market_type)
+        top_stocks = df.sort_values(by='Marcap', ascending=False).head(top_n)
+        
+        for _, row in top_stocks.iterrows():
+            code = str(row['Code']) + suffix
+            name = str(row['Name'])
+            all_stocks[code] = (market_tag, name, code)
+        print(f"   ✅ FDR {market_tag} 우회 수집 완료!")
+    except Exception as e:
+        print(f"   🚨 FDR 우회 수집마저 실패: {e}")
+
+if target_market in ['KR_KOSPI', 'ALL']: 
+    get_naver_universe(0, '.KS', 'KR_KOSPI')
+    if not any(v[0] == 'KR_KOSPI' for v in all_stocks.values()):
+        print("⚠️ 네이버 코스피 크롤링 차단 감지됨.")
+        get_fdr_fallback('KOSPI', '.KS', 'KR_KOSPI', 200)
+
+if target_market in ['KR_KOSDAQ', 'ALL']: 
+    get_naver_universe(1, '.KQ', 'KR_KOSDAQ')
+    if not any(v[0] == 'KR_KOSDAQ' for v in all_stocks.values()):
+        print("⚠️ 네이버 코스닥 크롤링 차단 감지됨.")
+        get_fdr_fallback('KOSDAQ', '.KQ', 'KR_KOSDAQ', 200)
 
 special_tickers = {'BRKB': 'BRK-B', 'BFB': 'BF-B'}
 if target_market in ['US', 'ALL']:
@@ -666,4 +691,4 @@ if SHEET_WEBHOOK_URL:
         else: print(f"⚠️ 구글 시트 전송 실패 (HTTP {req.status_code})")
     except Exception as e: print(f"🚨 구글 시트 통신 에러: {e}")
 
-print("🏁 봇 실행 완료 (Exit Code 0)")
+print("🏁 봇 실행 완료 (Exit Code 0)")  이 코드는 실전용 코드이다 아까 분석했던 백테스트 코드를 참고해서 완벽하게 일치시켜달라.
